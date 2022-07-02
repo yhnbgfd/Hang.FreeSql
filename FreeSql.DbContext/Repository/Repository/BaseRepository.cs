@@ -61,7 +61,7 @@ namespace FreeSql
         public void AsTable(Func<string, string> rule)
         {
             AsTableValueInternal = rule;
-            AsTableSelectValueInternal = rule == null ? null : new Func<Type, string, string>((a, b) => a == EntityType ? rule(b) : null);
+            AsTableSelectValueInternal = rule == null ? null : new Func<Type, string, string>((a, b) => rule(b));
         }
         public DbContextOptions DbContextOptions { get => _db.Options; set => _db.Options = value; }
 
