@@ -37,7 +37,7 @@ namespace FreeSql.Internal.CommonProvider
         public DbConnection _connection;
         public int _commandTimeout = 0;
         public Action<StringBuilder> _interceptSql;
-        public byte[] _updateVersionValue;
+        public object _updateVersionValue;
     }
 
     public abstract partial class UpdateProvider<T1> : UpdateProvider, IUpdate<T1>
@@ -139,7 +139,9 @@ namespace FreeSql.Internal.CommonProvider
                     throw new DbUpdateVersionException(CoreStrings.DbUpdateVersionException_RowLevelOptimisticLock(_source.Count, affrows), _table, sql, dbParms, affrows, _source.Select(a => (object)a));
                 foreach (var d in _source)
                 {
-                    if (_versionColumn.Attribute.MapType == typeof(byte[]))
+                    if (_versionColumn.Attribute.MapType == typeof(byte[])) 
+                        _orm.SetEntityValueWithPropertyName(_table.Type, d, _versionColumn.CsName, _updateVersionValue);
+                    else if (_versionColumn.Attribute.MapType == typeof(string))
                         _orm.SetEntityValueWithPropertyName(_table.Type, d, _versionColumn.CsName, _updateVersionValue);
                     else
                         _orm.SetEntityIncrByWithPropertyName(_table.Type, d, _versionColumn.CsName, 1);
@@ -449,6 +451,20 @@ namespace FreeSql.Internal.CommonProvider
             }
         }
 
+        public static void GetDictionaryTableInfo(IEnumerable<T1> source, IFreeSql orm, ref TableInfo table)
+        {
+            if (table == null && typeof(T1) == typeof(Dictionary<string, object>) && source is IEnumerable<Dictionary<string, object>> dicType)
+            {
+                var tempDict = new Dictionary<string, object>();
+                foreach (var item in dicType)
+                    foreach (string key in item.Keys)
+                        if (!tempDict.ContainsKey(key) && !(item[key] is null))
+                            tempDict[key] = item[key];
+                UpdateProvider<Dictionary<string, object>>.GetDictionaryTableInfo(tempDict, orm, ref table);
+                return;
+            }
+            GetDictionaryTableInfo(source.FirstOrDefault(), orm, ref table);
+        }
         public static void GetDictionaryTableInfo(T1 source, IFreeSql orm, ref TableInfo table)
         {
             if (table == null && typeof(T1) == typeof(Dictionary<string, object>))
@@ -491,7 +507,7 @@ namespace FreeSql.Internal.CommonProvider
         public IUpdate<T1> SetSource(IEnumerable<T1> source, Expression<Func<T1, object>> tempPrimarys = null, bool ignoreVersion = false)
         {
             if (source == null || source.Any() == false) return this;
-            GetDictionaryTableInfo(source.FirstOrDefault(), _orm, ref _table);
+            GetDictionaryTableInfo(source, _orm, ref _table);
             AuditDataValue(this, source, _orm, _table, _auditValueChangedDict);
             _source.AddRange(source.Where(a => a != null));
 
@@ -1003,6 +1019,11 @@ namespace FreeSql.Internal.CommonProvider
                 if (_versionColumn.Attribute.MapType == typeof(byte[]))
                 {
                     _updateVersionValue = Utils.GuidToBytes(Guid.NewGuid());
+                    sb.Append(", ").Append(vcname).Append(" = ").Append(_commonUtils.GetNoneParamaterSqlValue(_paramsSource, "uv", _versionColumn, _versionColumn.Attribute.MapType, _updateVersionValue));
+                }
+                else if (_versionColumn.Attribute.MapType == typeof(string))
+                {
+                    _updateVersionValue = Guid.NewGuid().ToString();
                     sb.Append(", ").Append(vcname).Append(" = ").Append(_commonUtils.GetNoneParamaterSqlValue(_paramsSource, "uv", _versionColumn, _versionColumn.Attribute.MapType, _updateVersionValue));
                 }
                 else

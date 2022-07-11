@@ -1,6 +1,7 @@
 ﻿using FreeSql.Extensions.EntityUtil;
 using FreeSql.Internal.Model;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -116,7 +117,7 @@ namespace FreeSql.Internal.CommonProvider
         public IInsertOrUpdate<T1> SetSource(IEnumerable<T1> source, Expression<Func<T1, object>> tempPrimarys = null)
         {
             if (source == null || source.Any() == false) return this;
-            UpdateProvider<T1>.GetDictionaryTableInfo(source.FirstOrDefault(), _orm, ref _table);
+            UpdateProvider<T1>.GetDictionaryTableInfo(source, _orm, ref _table);
             AuditDataValue(this, source, _orm, _table, _auditValueChangedDict);
             _source.AddRange(source.Where(a => a != null));
 
@@ -223,7 +224,7 @@ namespace FreeSql.Internal.CommonProvider
             }
         }
 
-        byte _SplitSourceByIdentityValueIsNullFlag = 0; //防止重复计算 SplitSource
+        byte _SplitSourceByIdentityValueIsNullFlag = 0 ;//防止重复计算 SplitSource
         /// <summary>
         /// 如果实体类有自增属性，分成两个 List，有值的Item1 merge，无值的Item2 insert
         /// </summary>
