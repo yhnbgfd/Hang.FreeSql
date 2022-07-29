@@ -151,14 +151,19 @@ public static partial class FreeSqlGlobalExtensions
         return Expression.New(ctor, ctor.GetParameters().Select(a => Expression.Constant(a.ParameterType.CreateInstanceGetDefaultValue(), a.ParameterType)));
     }
 
-    static ConcurrentDictionary<Type, ConstructorInfo> _dicInternalGetTypeConstructor0OrFirst = new ConcurrentDictionary<Type, ConstructorInfo>();
+    static ConcurrentDictionary<Type, Lazy<ConstructorInfo>> _dicInternalGetTypeConstructor0OrFirst = new ConcurrentDictionary<Type, Lazy<ConstructorInfo>>();
     internal static ConstructorInfo InternalGetTypeConstructor0OrFirst(this Type that, bool isThrow = true)
     {
         var ret = _dicInternalGetTypeConstructor0OrFirst.GetOrAdd(that, tp =>
-            tp.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[0], null) ??
-            tp.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).OrderBy(a => a.IsPublic ? 0 : 1).FirstOrDefault());
-        if (ret == null && isThrow) throw new ArgumentException(CoreStrings.Type_Cannot_Access_Constructor(that.FullName));
-        return ret;
+            new Lazy<ConstructorInfo>(() =>
+            {
+                return tp.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new Type[0], null) ??
+                    tp.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .OrderBy(a => a.IsPublic ? 0 : 1)
+                    .FirstOrDefault();
+            }));
+        if (ret.Value == null && isThrow) throw new ArgumentException(CoreStrings.Type_Cannot_Access_Constructor(that.FullName));
+        return ret.Value;
     }
 
     static ConcurrentDictionary<Type, Dictionary<string, PropertyInfo>> _dicGetPropertiesDictIgnoreCase = new ConcurrentDictionary<Type, Dictionary<string, PropertyInfo>>();
@@ -466,7 +471,7 @@ public static partial class FreeSqlGlobalExtensions
                 if (keyval.Length != 2) throw new ArgumentException(CoreStrings.ParameterError_NotValid_UseCommas(nameof(where)));
 
                 if (reftb.ColumnsByCs.TryGetValue(keyval[0], out var keycol) == false)
-                    throw new ArgumentException(CoreStrings.ParameterError_NotValid_PropertyName(nameof(where),keyval[0], reftb.Type.DisplayCsharp()));
+                    throw new ArgumentException(CoreStrings.ParameterError_NotValid_PropertyName(nameof(where), keyval[0], reftb.Type.DisplayCsharp()));
                 if (parTb.ColumnsByCs.TryGetValue(keyval[1], out var valcol) == false)
                     throw new ArgumentException(CoreStrings.ParameterError_NotValid_PropertyName(nameof(where), keyval[1], parTb.Type.DisplayCsharp()));
 
@@ -703,10 +708,10 @@ JOIN {select._commonUtils.QuoteSqlName(tbDbName)} a ON cte_tbc.cte_id = a.{selec
                 case DataType.OdbcSqlServer:
                 case DataType.Firebird:
                 case DataType.ClickHouse:
-                    sql1ctePath = select._commonExpression.ExpressionWhereLambda(select._tables, select._tableRule, Expression.Call(typeof(Convert).GetMethod("ToString", new Type[] { typeof(string) }), pathSelector?.Body), null, null, null);
+                    sql1ctePath = select._commonExpression.ExpressionWhereLambda(select._tables, select._tableRule, Expression.Call(typeof(Convert).GetMethod("ToString", new Type[] { typeof(string) }), pathSelector?.Body), select._diymemexpWithTempQuery, null, null);
                     break;
                 default:
-                    sql1ctePath = select._commonExpression.ExpressionWhereLambda(select._tables, select._tableRule, pathSelector?.Body, null, null, null);
+                    sql1ctePath = select._commonExpression.ExpressionWhereLambda(select._tables, select._tableRule, pathSelector?.Body, select._diymemexpWithTempQuery, null, null);
                     break;
             }
             sql1ctePath = $"{sql1ctePath} as cte_path, ";
@@ -724,7 +729,7 @@ JOIN {select._commonUtils.QuoteSqlName(tbDbName)} a ON cte_tbc.cte_id = a.{selec
         if (pathSelector != null)
         {
             select._tables[0].Parameter = pathSelector?.Parameters[0];
-            var wct2ctePath = select._commonExpression.ExpressionWhereLambda(select._tables, select._tableRule, pathSelector?.Body, null, null, null);
+            var wct2ctePath = select._commonExpression.ExpressionWhereLambda(select._tables, select._tableRule, pathSelector?.Body, select._diymemexpWithTempQuery, null, null);
             sql2ctePath = select._commonUtils.StringConcat(
                 new string[] {
                     up == false ? "wct1.cte_path" : wct2ctePath,
@@ -1210,5 +1215,5 @@ SELECT ");
 
     #endregion
 
-    
+
 }
