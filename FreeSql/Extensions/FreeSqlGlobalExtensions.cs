@@ -20,6 +20,12 @@ using System.Threading.Tasks;
 
 public static partial class FreeSqlGlobalExtensions
 {
+#if net40
+#else
+    static readonly Lazy<PropertyInfo> _TaskReflectionResultPropertyLazy = new Lazy<PropertyInfo>(() => typeof(Task).GetProperty("Result"));
+    internal static object GetTaskReflectionResult(this Task task) => _TaskReflectionResultPropertyLazy.Value.GetValue(task, new object[0]);
+#endif
+
     #region Type 对象扩展方法
     static Lazy<Dictionary<Type, bool>> _dicIsNumberType = new Lazy<Dictionary<Type, bool>>(() => new Dictionary<Type, bool>
     {
@@ -342,26 +348,26 @@ public static partial class FreeSqlGlobalExtensions
     /// <param name="list"></param>
     /// <param name="orm"></param>
     /// <param name="property">选择一个集合或普通属性</param>
-    /// <param name="where">设置临时的子集合关系映射，格式：子类属性=T1属性</param>
+    /// <param name="where">设置临时的子集合关系映射，格式：子类属性=T1属性，多组以逗号分割</param>
     /// <param name="take">设置子集合只取条数</param>
     /// <param name="select">设置子集合只查询部分字段</param>
     /// <returns></returns>
     /// <exception cref="ArgumentException"></exception>
-    public static List<T1> IncludeByPropertyName<T1>(this List<T1> list, IFreeSql orm, string property, string where = null, int take = 0, string select = null) where T1 : class
+    public static List<T1> IncludeByPropertyName<T1>(this List<T1> list, IFreeSql orm, string property, string where = null, int take = 0, string select = null, Expression<Action<ISelect<object>>> then = null) where T1 : class
     {
 #if net40
-        return IncludeByPropertyNameSyncOrAsync<T1>(false, list, orm, property, where, take, select);
+        return IncludeByPropertyNameSyncOrAsync<T1>(false, list, orm, property, where, take, select, then);
 #else
-        var task = IncludeByPropertyNameSyncOrAsync<T1>(false, list, orm, property, where, take, select);
+        var task = IncludeByPropertyNameSyncOrAsync<T1>(false, list, orm, property, where, take, select, then);
         if (task.Exception != null) throw task.Exception.InnerException ?? task.Exception;
         return task.Result;
 #endif
     }
 #if net40
 #else
-    public static Task<List<T1>> IncludeByPropertyNameAsync<T1>(this List<T1> list, IFreeSql orm, string property, string where = null, int take = 0, string select = null) where T1 : class
+    public static Task<List<T1>> IncludeByPropertyNameAsync<T1>(this List<T1> list, IFreeSql orm, string property, string where = null, int take = 0, string select = null, Expression<Action<ISelect<object>>> then = null) where T1 : class
     {
-        return IncludeByPropertyNameSyncOrAsync<T1>(true, list, orm, property, where, take, select);
+        return IncludeByPropertyNameSyncOrAsync<T1>(true, list, orm, property, where, take, select, then);
     }
 #endif
     static
@@ -370,17 +376,18 @@ public static partial class FreeSqlGlobalExtensions
 #else
         async Task<List<T1>>
 #endif
-        IncludeByPropertyNameSyncOrAsync<T1>(bool isAsync, List<T1> list, IFreeSql orm, string property, string where = null, int take = 0, string select = null) where T1 : class
+        IncludeByPropertyNameSyncOrAsync<T1>(bool isAsync, List<T1> list, IFreeSql orm, string property, string where, int take, string select, Expression<Action<ISelect<object>>> then) where T1 : class
     {
+        if (list?.Any() != true) return list;
+        var entityType = typeof(T1) == typeof(object) ? list[0].GetType() : typeof(T1);
+        var t1tb = orm.CodeFirst.GetTableByEntity(entityType);
         if (orm.CodeFirst.IsAutoSyncStructure)
         {
-            var tb = orm.CodeFirst.GetTableByEntity(typeof(T1));
-            if (tb == null || tb.Primarys.Any() == false)
-                (orm.CodeFirst as CodeFirstProvider)._dicSycedTryAdd(typeof(T1)); //._dicSyced.TryAdd(typeof(TReturn), true);
+            if (t1tb == null || t1tb.Primarys.Any() == false)
+                (orm.CodeFirst as CodeFirstProvider)._dicSycedTryAdd(entityType); //._dicSyced.TryAdd(typeof(TReturn), true);
         }
         var props = property.Split('.');
-        var t1tb = orm.CodeFirst.GetTableByEntity(typeof(T1));
-        var t1sel = orm.Select<T1>() as Select1Provider<T1>;
+        var t1sel = orm.Select<object>().AsType(entityType) as Select1Provider<object>;
         var t1expFul = t1sel.ConvertStringPropertyToExpression(property, true);
         var t1exp = props.Length == 1 ? t1expFul : t1sel.ConvertStringPropertyToExpression(props[0], true);
         if (t1expFul == null) throw new ArgumentException(CoreStrings.Cannot_Resolve_ExpressionTree(nameof(property)));
@@ -389,7 +396,7 @@ public static partial class FreeSqlGlobalExtensions
         {
             if (props.Length > 1)
                 IncludeByPropertyName(list, orm, string.Join(".", props.Take(props.Length - 1)));
-            var imsel = IncludeManyByPropertyNameCommonGetSelect<T1>(orm, property, where, take, select);
+            var imsel = IncludeManyByPropertyNameCommonGetSelect(orm, entityType, property, where, take, select, then);
 #if net40
             imsel.SetList(list);
 #else
@@ -403,10 +410,8 @@ public static partial class FreeSqlGlobalExtensions
         var reftb = orm.CodeFirst.GetTableByEntity(t1exp.Type);
         var refsel = orm.Select<object>().AsType(t1exp.Type) as Select1Provider<object>;
         if (props.Length > 1)
-        {
-            var refexp = refsel.ConvertStringPropertyToExpression(string.Join(".", props.Skip(1)), true);
-            refsel.Include(Expression.Lambda<Func<object, object>>(refexp, refsel._tables[0].Parameter));
-        }
+            refsel.IncludeByPropertyName(string.Join(".", props.Skip(1)));
+
         var listdic = list.Select(item =>
         {
             var refitem = t1exp.Type.CreateInstanceGetDefaultValue();
@@ -438,15 +443,15 @@ public static partial class FreeSqlGlobalExtensions
         });
         return list;
     }
-    static Select1Provider<T1> IncludeManyByPropertyNameCommonGetSelect<T1>(IFreeSql orm, string property, string where = null, int take = 0, string select = null) where T1 : class
+    static Select1Provider<object> IncludeManyByPropertyNameCommonGetSelect(IFreeSql orm, Type entityType, string property, string where, int take, string select, Expression<Action<ISelect<object>>> then)
     {
         if (orm.CodeFirst.IsAutoSyncStructure)
         {
-            var tb = orm.CodeFirst.GetTableByEntity(typeof(T1));
+            var tb = orm.CodeFirst.GetTableByEntity(entityType);
             if (tb == null || tb.Primarys.Any() == false)
-                (orm.CodeFirst as CodeFirstProvider)._dicSycedTryAdd(typeof(T1)); //._dicSyced.TryAdd(typeof(TReturn), true);
+                (orm.CodeFirst as CodeFirstProvider)._dicSycedTryAdd(entityType); //._dicSyced.TryAdd(typeof(TReturn), true);
         }
-        var sel = orm.Select<T1>() as Select1Provider<T1>;
+        var sel = orm.Select<object>().AsType(entityType) as Select1Provider<object>;
         var exp = sel.ConvertStringPropertyToExpression(property, true);
         if (exp == null) throw new ArgumentException(CoreStrings.Cannot_Resolve_ExpressionTree(nameof(property)));
         var memExp = exp as MemberExpression;
@@ -506,12 +511,26 @@ public static partial class FreeSqlGlobalExtensions
             memberInitExp = Expression.Lambda(reffuncType, memberInitExp, refparamExp);
             exp = Expression.Call(refWhereMethod, exp, memberInitExp);
         }
+        Delegate newthen = null;
+        if (then != null)
+        {
+            var newthenParm = Expression.Parameter(typeof(ISelect<>).MakeGenericType(reftb.Type));
+            var newthenLambdaBody = new Select1Provider<object>.ReplaceIncludeByPropertyNameParameterVisitor().Modify(then, newthenParm);
+            var newthenLambda = Expression.Lambda(typeof(Action<>).MakeGenericType(newthenParm.Type), newthenLambdaBody, newthenParm);
+            newthen = newthenLambda.Compile();
+        }
 
-        var funcType = typeof(Func<,>).MakeGenericType(sel._tables[0].Table.Type, typeof(IEnumerable<>).MakeGenericType(reftb.Type));
+        var funcType = typeof(Func<,>).MakeGenericType(typeof(object), typeof(IEnumerable<>).MakeGenericType(reftb.Type));
+        if (sel._tables[0].Table.Type != typeof(object))
+        {
+            var expParm = Expression.Parameter(typeof(object), sel._tables[0].Alias);
+            exp = new Select0Provider.ReplaceMemberExpressionVisitor().Replace(exp, sel._tables[0].Parameter, Expression.Convert(expParm, sel._tables[0].Table.Type));
+            sel._tables[0].Parameter = expParm;
+        }
         var navigateSelector = Expression.Lambda(funcType, exp, sel._tables[0].Parameter);
         var incMethod = sel.GetType().GetMethod("IncludeMany");
         if (incMethod == null) throw new Exception(CoreStrings.RunTimeError_Reflection_IncludeMany);
-        incMethod.MakeGenericMethod(reftb.Type).Invoke(sel, new object[] { navigateSelector, null });
+        incMethod.MakeGenericMethod(reftb.Type).Invoke(sel, new object[] { navigateSelector, newthen });
         return sel;
     }
     #endregion

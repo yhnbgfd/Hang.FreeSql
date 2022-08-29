@@ -8,6 +8,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Data.Odbc;
 using System.Data.SqlClient;
 using System.Data.SQLite;
@@ -312,8 +313,35 @@ namespace base_entity
         {
             public DateTime Date { get; set; }
         }
+        record TestClass(string Name)
+        {
+            public Guid Id { get; set; }
+            public string[] Tags { get; init; } = Array.Empty<string>();
+        }
+
+        class BaseModel<T>
+        {
+            public static int fsql;
+        }
+        class StringNulable
+        {
+            [Column(IsPrimary = true)]
+            public string id { get; set; }
+            [Column(StringLength = -1, IsNullable = true)]
+            public string code1 { get; set; }
+            [Column(StringLength = -1, IsNullable = false)]
+            public string code2 { get; set; }
+        }
+
+
         static void Main(string[] args)
         {
+            BaseModel<User1>.fsql = 1;
+            BaseModel<UserGroup>.fsql = 2;
+            Console.WriteLine(BaseModel<User1>.fsql);
+            Console.WriteLine(BaseModel<UserGroup>.fsql);
+
+
             #region 初始化 IFreeSql
             var fsql = new FreeSql.FreeSqlBuilder()
                 .UseAutoSyncStructure(true)
@@ -328,7 +356,7 @@ namespace base_entity
                 //.UseConnectionString(FreeSql.DataType.Firebird, @"database=localhost:D:\fbdata\EXAMPLES.fdb;user=sysdba;password=123456;max pool size=5")
 
 
-                //.UseConnectionString(FreeSql.DataType.MySql, "Data Source=127.0.0.1;Port=3306;User ID=root;Password=root;Initial Catalog=cccddd;Charset=utf8;SslMode=none;Max pool size=2")
+                //.UseConnectionString(FreeSql.DataType.MySql, "Data Source=127.0.0.1;Port=3306;User ID=root;Password=root;Initial Catalog=cccddd;Charset=utf8;SslMode=none;min pool size=1;Max pool size=2")
 
                 //.UseConnectionString(FreeSql.DataType.SqlServer, "Data Source=.;Integrated Security=True;Initial Catalog=freesqlTest;Pooling=true;Max Pool Size=3;TrustServerCertificate=true")
 
@@ -360,6 +388,79 @@ namespace base_entity
                 .Build();
             BaseEntity.Initialization(fsql, () => _asyncUow.Value);
             #endregion
+
+            var dbpars = new List<DbParameter>();
+
+            var a1id1 = Guid.NewGuid();
+            var a1id2 = Guid.NewGuid();
+            //fsql.CodeFirst.IsGenerateCommandParameterWithLambda = true;
+            var sql1a0 = fsql.Select<User1>()
+                .WithParameters(dbpars)
+                .Where(a => a.Id == a1id1)
+
+                .UnionAll(
+                    fsql.Select<User1>()
+                        .WithParameters(dbpars)
+                        .Where(a => a.Id == a1id2),
+
+                    fsql.Select<User1>()
+                        .WithParameters(dbpars)
+                        .Where(a => a.Id == a1id2)
+                )
+                .Where(a => a.Id == a1id1 || a.Id == a1id2)
+                .ToSql();
+            var sql1a1 = fsql.Select<User1>()
+                .Where(a => a.Id == a1id1)
+                .UnionAll(
+                    fsql.Select<User1>()
+                    .Where(a => a.Id == a1id2)
+                )
+                .Where(a => a.Id == a1id1 || a.Id == a1id2)
+                .ToSql();
+            var sql1a2 = fsql.Select<User1, UserGroup>()
+                .InnerJoin((a,b)=> a.GroupId == b.Id)
+                .Where((a, b) => a.Id == a1id1)
+                .WithTempQuery((a, b) => new { user = a, group = b }) //匿名类型
+
+                .UnionAll(
+                    fsql.Select<User1, UserGroup>()
+                        .InnerJoin((a, b) => a.GroupId == b.Id)
+                        .Where((a, b) => a.Id == a1id2)
+                        .WithTempQuery((a, b) => new { user = a, group = b }) //匿名类型
+                )
+
+                .Where(a => a.user.Id == a1id1 || a.user.Id == a1id2)
+                .ToSql();
+
+
+            var ddlsql01 = fsql.CodeFirst.GetComparisonDDLStatements<StringNulable>();
+
+            Expression<Func<HzyTuple<User1, Group, Group, Group, Group, Group>, bool>> where = null;
+            where = where.Or(a => a.t6.Index > 0);
+            where = where.Or(a => a.t5.Index > 0);
+            where = where.Or(a => a.t4.Index > 0);
+            where = where.Or(a => a.t3.Index > 0);
+            where = where.Or(a => a.t2.Index > 0);
+            where = where.Or(a => a.t1.Nickname.Length > 0);
+
+            var sql11224333 = fsql.Select<User1, Group, Group, Group, Group, Group>().Where(where).ToSql();
+
+
+            fsql.UseJsonMap();
+
+            fsql.CodeFirst.ConfigEntity<TestClass>(cf =>
+            {
+	            cf.Property(p => p.Name).IsNullable(false);
+	            cf.Property(p => p.Tags).JsonMap();
+            });
+
+            fsql.Insert(new TestClass("test 1")
+            {
+                Tags = new[] { "a", "b" },
+            })
+            .ExecuteAffrows();
+            var records = fsql.Queryable<TestClass>().ToList();
+
 
             InitData();
             InitData();

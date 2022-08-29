@@ -193,6 +193,7 @@ namespace FreeSql
         ISelect<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16> From<T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>(Expression<Func<ISelectFromExpression<T1>, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, ISelectFromExpression<T1>>> exp = null) where T2 : class where T3 : class where T4 : class where T5 : class where T6 : class where T7 : class where T8 : class where T9 : class where T10 : class where T11 : class where T12 : class where T13 : class where T14 : class where T15 : class where T16 : class;
 
         ISelect<T1, T2> FromQuery<T2>(ISelect<T2> select2) where T2 : class;
+        ISelect<T1> UnionAll(params ISelect<T1>[] querys);
 
         /// <summary>
         /// 查询条件，Where(a => a.Id > 10)，支持导航对象查询，Where(a => a.Author.Email == "2881099@qq.com")
@@ -351,6 +352,7 @@ namespace FreeSql
         /// <param name="property"></param>
         /// <returns></returns>
         ISelect<T1> IncludeByPropertyName(string property);
+        ISelect<T1> IncludeByPropertyName(string property, Expression<Action<ISelect<object>>> then);
         /// <summary>
         /// 按属性名字符串进行 Include/IncludeMany 操作
         /// </summary>
@@ -358,6 +360,7 @@ namespace FreeSql
         /// <param name="property"></param>
         /// <returns></returns>
         ISelect<T1> IncludeByPropertyNameIf(bool condition, string property);
+        ISelect<T1> IncludeByPropertyNameIf(bool condition, string property, Expression<Action<ISelect<object>>> then);
 
         /// <summary>
         /// 实现 select .. from ( select ... from t ) a 这样的功能<para></para>

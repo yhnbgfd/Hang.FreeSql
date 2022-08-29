@@ -51,6 +51,16 @@ namespace FreeSql.Internal
         public bool ReadAnonymousField(List<SelectTableInfo> _tables, Func<Type, string, string> _tableRule, StringBuilder field, ReadAnonymousTypeInfo parent, ref int index, Expression exp, Select0Provider select,
             BaseDiyMemberExpression diymemexp, List<GlobalFilter.Item> whereGlobalFilter, List<string> findIncludeMany, List<Expression> findSubSelectMany, bool isAllDtoMap)
         {
+            bool LocalEndsWithField(string dbField, string dbNestedField)
+            {
+                switch (_ado.DataType)
+                {
+                    case DataType.SqlServer:
+                    case DataType.OdbcSqlServer:
+                        return dbField.EndsWith(dbNestedField, StringComparison.CurrentCultureIgnoreCase);
+                }
+                return dbField.EndsWith(dbNestedField);
+            }
             void LocalSetFieldAlias(ref int localIndex, bool isdiymemexp)
             {
                 if (localIndex >= 0)
@@ -63,7 +73,7 @@ namespace FreeSql.Internal
                 else if (string.IsNullOrEmpty(parent.CsName) == false)
                 {
                     parent.DbNestedField = GetFieldAsCsName(parent.CsName);
-                    if (localIndex == ReadAnonymousFieldAsCsName && parent.DbField.EndsWith(parent.DbNestedField, StringComparison.CurrentCultureIgnoreCase) == false) //DbField 和 CsName 相同的时候，不处理
+                    if (localIndex == ReadAnonymousFieldAsCsName && LocalEndsWithField(parent.DbField, parent.DbNestedField) == false) //DbField 和 CsName 相同的时候，不处理
                         field.Append(_common.FieldAsAlias(parent.DbNestedField));
                 }
             }
@@ -253,7 +263,7 @@ namespace FreeSql.Internal
                                 else if (string.IsNullOrEmpty(parent.CsName) == false)
                                 {
                                     dbNestedField = GetFieldAsCsName(parent.CsName);
-                                    if (index == ReadAnonymousFieldAsCsName && diymemexp._field.EndsWith(dbNestedField, StringComparison.CurrentCultureIgnoreCase) == false) //DbField 和 CsName 相同的时候，不处理
+                                    if (index == ReadAnonymousFieldAsCsName && LocalEndsWithField(diymemexp._field, dbNestedField) == false) //DbField 和 CsName 相同的时候，不处理
                                         field.Append(_common.FieldAsAlias(dbNestedField));
                                 }
                             }
@@ -484,7 +494,7 @@ namespace FreeSql.Internal
                     if (parent.Childs.Any() == false) throw new Exception(CoreStrings.Mapping_Exception_HasNo_SamePropertyName(newExp.Type.Name));
                     return true;
             }
-            parent.DbField = $"({ExpressionLambdaToSql(exp, getTSC())})";
+            parent.DbField = ExpressionLambdaToSql(exp, getTSC()); //解决 new { a = id + 1 } 翻译后 ((id+1)) 问题
             field.Append(", ").Append(parent.DbField);
             LocalSetFieldAlias(ref index, false);
             if (parent.CsType == null && exp.Type.IsValueType) parent.CsType = exp.Type;
@@ -744,7 +754,16 @@ namespace FreeSql.Internal
                             return ExpressionLambdaToSql(Expression.Call(leftExp, MethodDateTimeSubtractTimeSpan, rightExp), tsc);
                     }
                     if (oper == "OR")
-                        return $"({GetBoolString(ExpressionLambdaToSql(leftExp, tsc))} {oper} {GetBoolString(ExpressionLambdaToSql(rightExp, tsc))})";
+                    {
+                        var leftBool = ExpressionLambdaToSql(leftExp, tsc);
+                        if (SearchColumnByField(tsc._tables, tsc.currentTable, leftBool) != null) leftBool = $"{leftBool} = {formatSql(true, null, null, null)}";
+                        else leftBool = GetBoolString(leftBool);
+
+                        var rightBool = ExpressionLambdaToSql(rightExp, tsc);
+                        if (SearchColumnByField(tsc._tables, tsc.currentTable, rightBool) != null) rightBool = $"{rightBool} = {formatSql(true, null, null, null)}";
+                        else rightBool = GetBoolString(rightBool);
+                        return $"({leftBool} {oper} {rightBool})";
+                    }
                     return $"({ExpressionLambdaToSql(leftExp, tsc)} {oper} {ExpressionLambdaToSql(rightExp, tsc)})";
                 case "=":
                 case "<>":
@@ -878,7 +897,7 @@ namespace FreeSql.Internal
                     _common._orm.Aop.ParseExpressionHandler(this, args);
                     if (string.IsNullOrEmpty(args.Result) == false) return args.Result;
                 }
-                ParseExpressionNoAsSelect(this, args, tsc._tableRule);
+                ParseExpressionNoAsSelect(this, args, tsc._tableRule, tsc.whereGlobalFilter);
                 if (string.IsNullOrEmpty(args.Result) == false) return args.Result;
             }
             switch (exp.NodeType)
@@ -1119,6 +1138,7 @@ namespace FreeSql.Internal
                                 Select0Provider fsqlSelect0 = null;
                                 List<SelectTableInfo> fsqltables = null;
                                 var fsqltable1SetAlias = false;
+                                var fsqltable1SetAliasGai = 0;
                                 Type fsqlType = null;
                                 Stack<Expression> asSelectBefores = new Stack<Expression>();
                                 var asSelectSql = "";
@@ -1239,11 +1259,10 @@ namespace FreeSql.Internal
                                                 }));
                                             }
                                         }
-                                        if (tsc.whereGlobalFilter?.Any() == true)
+                                        if (tsc.whereGlobalFilter != null)
                                         {
-                                            var fsqlGlobalFilter = fsqlSelect0._whereGlobalFilter;
-                                            if (fsqlGlobalFilter != tsc.whereGlobalFilter)
-                                                fsqlGlobalFilter.AddRange(tsc.whereGlobalFilter.Where(b => !fsqlGlobalFilter.Any(a => a.Name == b.Name)));
+                                            fsqlSelect0._whereGlobalFilter.Clear();
+                                            if (tsc.whereGlobalFilter.Any()) fsqlSelect0._whereGlobalFilter.AddRange(tsc.whereGlobalFilter);
                                         }
                                     }
                                     else if (fsqlType != null)
@@ -1280,16 +1299,16 @@ namespace FreeSql.Internal
 
                                                             if (argExpLambda.Parameters.Count == 1 && argExpLambda.Parameters[0].Type.FullName.StartsWith("FreeSql.Internal.Model.HzyTuple`"))
                                                             {
-                                                                for (var gai = 0; gai < fsqlTypeGenericArgs.Length; gai++)
-                                                                    fsqltables[gai].Alias = "ht" + (gai + 1);
+                                                                for (; fsqltable1SetAliasGai < fsqlTypeGenericArgs.Length; fsqltable1SetAliasGai++)
+                                                                    fsqltables[fsqltable1SetAliasGai].Alias = "ht" + (fsqltable1SetAliasGai + 1);
                                                             }
                                                             else
                                                             {
-                                                                for (var gai = 0; gai < fsqlTypeGenericArgs.Length && gai < argExpLambda.Parameters.Count; gai++)
+                                                                for (; fsqltable1SetAliasGai < fsqlTypeGenericArgs.Length && fsqltable1SetAliasGai < argExpLambda.Parameters.Count; fsqltable1SetAliasGai++)
                                                                 {
-                                                                    var alias = argExpLambda.Parameters[gai].Name;
+                                                                    var alias = argExpLambda.Parameters[fsqltable1SetAliasGai].Name;
                                                                     if (fsqltables.Any(x => x.Type == SelectTableInfoType.Parent && x.Alias == alias)) alias = $"sub_{alias}";
-                                                                    fsqltables[gai].Alias = alias;
+                                                                    fsqltables[fsqltable1SetAliasGai].Alias = alias;
                                                                 }
                                                             }
                                                         }
@@ -1311,7 +1330,23 @@ namespace FreeSql.Internal
                                                 if (_subSelectParentDiyMemExps.Value == null) _subSelectParentDiyMemExps.Value = new List<BaseDiyMemberExpression>();
                                                 _subSelectParentDiyMemExps.Value.Add(tsc.diymemexp);
                                             }
-                                            method.Invoke(fsql, args);
+                                            switch (method.Name)
+                                            {
+                                                case nameof(ISelect<object>.From):
+                                                case nameof(ISelect<object>.FromQuery):
+                                                case nameof(ISelect<object>.WithTempQuery):
+                                                    fsql = method.Invoke(fsql, args);
+                                                    fsqlType = fsql.GetType();
+                                                    fsqlSelect0 = fsql as Select0Provider;
+                                                    if (tsc.dbParams != null) fsqlSelect0._params = tsc.dbParams;
+                                                    fsqltables = fsqlSelect0._tables;
+                                                    fsqltable1SetAlias = false;
+                                                    if (method.Name == nameof(ISelect<object>.WithTempQuery)) fsqltable1SetAliasGai = 0;
+                                                    break;
+                                                default:
+                                                    method.Invoke(fsql, args);
+                                                    break;
+                                            }
                                         }
                                         finally
                                         {
@@ -1495,7 +1530,16 @@ namespace FreeSql.Internal
                                                             return $"({sql3.Replace(" \r\n", " \r\n    ")})";
                                                     }
                                                     asSelectBefores.Clear();
-                                                    return ExpressionLambdaToSql(manySubSelectExpBoy, tsc);
+                                                    var tscwhereGlobalFilter = tsc.whereGlobalFilter;
+                                                    try
+                                                    {
+                                                        tsc.whereGlobalFilter = fsqlSelect0._whereGlobalFilter; //ManyToMany 中间表过滤器
+                                                        return ExpressionLambdaToSql(manySubSelectExpBoy, tsc);
+                                                    }
+                                                    finally
+                                                    {
+                                                        tsc.whereGlobalFilter = tscwhereGlobalFilter;
+                                                    }
                                                 }
                                                 for (var mn = 0; mn < parm123Ref.Columns.Count; mn++)
                                                 {
@@ -1685,15 +1729,19 @@ namespace FreeSql.Internal
                         return formatSql(Expression.Lambda(exp).Compile().DynamicInvoke(), tsc.mapType, tsc.mapColumnTmp, tsc.dbParams);
                     }
                     if (callExp != null) return ExpressionLambdaToSql(callExp, tsc);
-                    if (tsc.diymemexp != null)
+                    var diymemexps = new[] { tsc.diymemexp, tsc.subSelect001?._diymemexpWithTempQuery };
+                    foreach (var diymemexp in diymemexps)
                     {
-                        var expStackFirst = expStack.First() as ParameterExpression;
-                        var bidx = expStackFirst.Type.FullName.StartsWith("FreeSql.ISelectGroupingAggregate`") ? 2 : 1; //.Key .Value
-                        var diyexpMembers = expStack.Where((a, b) => b >= bidx).ToArray();
-                        if (diyexpMembers.Any() == false && tsc.diymemexp != null && tsc.diymemexp is Select0Provider.WithTempQueryParser tempQueryParser && tempQueryParser.GetOutsideSelectTable(expStackFirst) != null)
-                            diyexpMembers = expStack.ToArray();
-                        var diyexpResult = tsc.diymemexp.ParseExp(diyexpMembers);
-                        if (string.IsNullOrEmpty(diyexpResult) == false) return diyexpResult;
+                        if (diymemexp != null)
+                        {
+                            var expStackFirst = expStack.First() as ParameterExpression;
+                            var bidx = expStackFirst.Type.FullName.StartsWith("FreeSql.ISelectGroupingAggregate`") ? 2 : 1; //.Key .Value
+                            var diyexpMembers = expStack.Where((a, b) => b >= bidx).ToArray();
+                            if (diyexpMembers.Any() == false && diymemexp != null && diymemexp is Select0Provider.WithTempQueryParser tempQueryParser && tempQueryParser.GetOutsideSelectTable(expStackFirst) != null)
+                                diyexpMembers = expStack.ToArray();
+                            var diyexpResult = diymemexp.ParseExp(diyexpMembers);
+                            if (string.IsNullOrEmpty(diyexpResult) == false) return diyexpResult;
+                        }
                     }
                     var psgpdymes = _subSelectParentDiyMemExps.Value; //解决：分组之后的子查询解析
                     if (psgpdymes?.Any() == true)
@@ -1759,13 +1807,18 @@ namespace FreeSql.Internal
                                 if (finds.Length != 1)
                                 {
                                     finds = tsc._tables.Where(a2 => (isa && a2.Parameter != null || isa && a2.Parameter == null) &&
-                                        a2.Table.Type == tbtmp.Type).ToArray();
+                                       tbtmp.Type.IsAssignableFrom(a2.Table.Type) && a2.Alias == alias).ToArray();
                                     if (finds.Length != 1)
                                     {
                                         finds = tsc._tables.Where(a2 => (isa && a2.Parameter != null || isa && a2.Parameter == null) &&
                                             a2.Table.Type == tbtmp.Type).ToArray();
                                         if (finds.Length != 1)
-                                            finds = tsc._tables.Where(a2 => a2.Table.Type == tbtmp.Type).ToArray();
+                                        {
+                                            finds = tsc._tables.Where(a2 => (isa && a2.Parameter != null || isa && a2.Parameter == null) &&
+                                                a2.Table.Type == tbtmp.Type).ToArray();
+                                            if (finds.Length != 1)
+                                                finds = tsc._tables.Where(a2 => a2.Table.Type == tbtmp.Type).ToArray();
+                                        }
                                     }
                                 }
                             }
@@ -1874,7 +1927,7 @@ namespace FreeSql.Internal
                                         alias2 = $"{alias2}__{mp2.Member.Name}";
                                     find2 = getOrAddTable(tb2tmp, alias2, exp2IsParameter, parmExp2, mp2);
                                     alias2 = find2.Alias;
-                                    tb2 = tb2tmp;
+                                    tb2 = find2.Table; // tb2tmp; 此处修改解决 Select<BaseEntity>().AsType(Entity1).ToList(a => a)
                                 }
                                 if (exp2IsParameter && expStack.Any() == false)
                                 { //附加选择的参数所有列
@@ -2199,6 +2252,8 @@ namespace FreeSql.Internal
             {
                 if (node.Expression == _oldexp)
                     return Expression.Property(_newexp, node.Member.Name);
+                if (node == _oldexp)
+                    return _newexp;
                 return base.VisitMember(node);
             }
         }
@@ -2227,7 +2282,9 @@ namespace FreeSql.Internal
             public LambdaExpression Modify(LambdaExpression lambda, List<SelectTableInfo> tables)
             {
                 this.tables = tables.Where(a => a.Type != SelectTableInfoType.Parent).ToList();
-                parameters = this.tables.Select(a => a.Parameter ?? Expression.Parameter(a.Table.Type, a.Alias)).ToArray();
+                parameters = this.tables.Select(a => a.Parameter ?? 
+                    Expression.Parameter(a.Table.Type, 
+                        a.Alias.StartsWith("SP10") ? a.Alias.Replace("SP10", "ht") : a.Alias)).ToArray();
                 var exp = Visit(lambda.Body);
                 return Expression.Lambda(exp, parameters);
             }
@@ -2241,13 +2298,21 @@ namespace FreeSql.Internal
                     if (parent.Expression?.NodeType == ExpressionType.Parameter &&
                         parent.Expression.Type.Name.StartsWith("HzyTuple`") == true &&
                         int.TryParse(parent.Member.Name.Replace("t", ""), out widx) && widx > 0 && widx <= tables.Count)
+                    {
+                        if (parameters[widx - 1].Type != parent.Type) //解决 BaseEntity + AsTable 时报错
+                            parameters[widx - 1] = Expression.Parameter(parent.Type, parameters[widx - 1].Name);
                         return Expression.Property(parameters[widx - 1], node.Member.Name);
+                    }
                 }
 
                 if (node.Expression?.NodeType == ExpressionType.Parameter &&
                     node.Expression.Type.Name.StartsWith("HzyTuple`") == true &&
                     int.TryParse(node.Member.Name.Replace("t", ""), out widx) && widx > 0 && widx <= tables.Count)
+                {
+                    if (parameters[widx - 1].Type != node.Type) //解决 BaseEntity + AsTable 时报错
+                        parameters[widx - 1] = Expression.Parameter(node.Type, parameters[widx - 1].Name);
                     return parameters[widx - 1];
+                }
 
                 return base.VisitMember(node);
             }
@@ -2280,7 +2345,7 @@ namespace FreeSql.Internal
             //return string.Concat(_ado.AddslashesProcessParam(obj, mapType, mapColumn));
         }
 
-        public static void ParseExpressionNoAsSelect(object sender, Aop.ParseExpressionEventArgs e, Func<Type, string, string> tableRule)
+        public static void ParseExpressionNoAsSelect(object sender, Aop.ParseExpressionEventArgs e, Func<Type, string, string> tableRule, List<GlobalFilter.Item> whereGlobalFilter)
         {
             if (e.Expression.NodeType != ExpressionType.Call &&
                 (e.Expression as MemberExpression)?.Member.Name != "Count") return;
@@ -2359,6 +2424,11 @@ namespace FreeSql.Internal
                         mtmReftbname = mtmReftbname.Substring(0, mtmReftbname.Length - commonExp._common.QuoteSqlName(exp3Tb.ColumnsByPosition[0].Attribute.Name).Length - 1);
                         var midSelect = commonExp._common._orm.Select<object>().As($"M{select._tables[0].Alias}_M{mtmReftbname}").AsType(memberTbref.RefMiddleEntityType) as Select1Provider<object>;
                         if (tableRule != null) midSelect._tableRules.Add(tableRule);
+                        if (whereGlobalFilter != null)
+                        {
+                            midSelect._whereGlobalFilter.Clear();
+                            if (whereGlobalFilter.Any()) midSelect._whereGlobalFilter.AddRange(whereGlobalFilter);
+                        }
                         switch (commonExp._ado.DataType)
                         {
                             case DataType.Oracle:
@@ -2416,6 +2486,11 @@ namespace FreeSql.Internal
                     Parameter = a.Parameter
                 }));
                 if (tableRule != null) select._tableRules.Add(tableRule);
+                if (whereGlobalFilter != null)
+                {
+                    select._whereGlobalFilter.Clear();
+                    if (whereGlobalFilter.Any()) select._whereGlobalFilter.AddRange(whereGlobalFilter);
+                }
             }
             while (true)
             {

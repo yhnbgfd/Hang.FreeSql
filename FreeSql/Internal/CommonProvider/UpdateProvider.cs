@@ -424,6 +424,8 @@ namespace FreeSql.Internal.CommonProvider
                         if (changedDict != null && changedDict.ContainsKey(col.Attribute.Name) == false)
                             changedDict.Add(col.Attribute.Name, true);
                     }
+                    if (auditArgs.ObjectAuditBreak) break;
+
                     if (val == null && col.Attribute.MapType == typeof(string) && col.Attribute.IsNullable == false)
                         col.SetValue(d, val = "");
                 }
@@ -446,6 +448,8 @@ namespace FreeSql.Internal.CommonProvider
                     if (changedDict != null && changedDict.ContainsKey(col.Attribute.Name) == false)
                         changedDict.Add(col.Attribute.Name, true);
                 }
+                if (auditArgs.ObjectAuditBreak) break;
+
                 if (val == null && col.Attribute.MapType == typeof(string) && col.Attribute.IsNullable == false)
                     col.SetValue(data, val = "");
             }
@@ -622,6 +626,11 @@ namespace FreeSql.Internal.CommonProvider
                     if (replval == null) continue;
                     var replname = _commonUtils.QuoteSqlName(col.Column.Attribute.Name);
                     expt = expt.Replace(replname, _commonUtils.IsNull(replname, _commonUtils.FormatSql("{0}", replval)));
+                } 
+                else if (col.Column.CsType == typeof(string))
+                {
+                    var replname = _commonUtils.QuoteSqlName(col.Column.Attribute.Name);
+                    expt = expt.Replace(replname, _commonUtils.IsNull(replname, _commonUtils.FormatSql("{0}", "")));
                 }
             }
             _setIncr.Append(", ").Append(_commonUtils.QuoteSqlName(cols.First().Column.Attribute.Name)).Append(" = ").Append(expt);

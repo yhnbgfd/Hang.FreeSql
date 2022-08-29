@@ -66,8 +66,10 @@ namespace FreeSql.Internal.CommonProvider
                         }
                         if (tempQueryParser._outsideTable.Contains(curtable))
                         {
+                            var replaceMember = firstMember.Type == curtable.Parameter.Type ? firstMember : members[0];
+                            var replaceVistor = new CommonExpression.ReplaceVisitor();
                             for (var a = 0; a < members.Length; a++)
-                                members[a] = new CommonExpression.ReplaceVisitor().Modify(members[a], firstMember, curtable.Parameter);
+                                members[a] = replaceVistor.Modify(members[a], replaceMember, curtable.Parameter);
                             var ret = _select._diymemexpWithTempQuery.ParseExp(members);
                             ParseExpMapResult = _select._diymemexpWithTempQuery.ParseExpMapResult;
                             return ret;
@@ -232,6 +234,11 @@ namespace FreeSql.Internal.CommonProvider
             if (_orm.CodeFirst.IsAutoSyncStructure)
                 (_orm.CodeFirst as CodeFirstProvider)._dicSycedTryAdd(typeof(TDto)); //._dicSyced.TryAdd(typeof(TReturn), true);
             var ret = (_orm as BaseDbProvider).CreateSelectProvider<TDto>(null) as Select1Provider<TDto>;
+            ret._commandTimeout = _select._commandTimeout;
+            ret._connection = _select._connection;
+            ret._transaction = _select._transaction;
+            ret._whereGlobalFilter = new List<GlobalFilter.Item>(_select._whereGlobalFilter.ToArray());
+            ret._cancel = _select._cancel;
             if (ret._tables[0].Table == null) ret._tables[0].Table = TableInfo.GetDefaultTable(typeof(TDto));
             var parser = new Select0Provider.WithTempQueryParser(_select, this, selector, ret._tables[0]);
             var sql = $"\r\n{this.ToSql(parser._insideSelectList[0].InsideField)}";

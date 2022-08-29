@@ -133,10 +133,16 @@ namespace FreeSql.Internal.CommonProvider
             (_diymemexpWithTempQuery as WithTempQueryParser)?.Append(select2, rettbs[1]);
             var select2sp = select2 as Select0Provider;
             string sql2 = null;
-            if (select2sp._diymemexpWithTempQuery == null) 
+            if (select2sp._diymemexpWithTempQuery == null)
+            {
+                if (select2sp._tableRule == null && select2sp._tables[0].Table.Type == typeof(T2) && select2sp.IsDefaultSqlContent == true)
+                    return ret;
                 sql2 = select2?.ToSql(a => a, FieldAliasOptions.AsProperty);
+            }
             else
             {
+                if (retsp._diymemexpWithTempQuery == null)
+                    retsp._diymemexpWithTempQuery = new WithTempQueryParser(null, null, null, null).Append(select2, rettbs[1]);
                 if (select2sp._tableRule != null && select2sp.IsDefaultSqlContent == true)
                 {
                     sql2 = select2sp._tableRule(select2sp._tables[0].Table.Type, null);
@@ -164,6 +170,25 @@ namespace FreeSql.Internal.CommonProvider
                 });
             }
             if (retsp._tableRules.Count == 0) ret.WithSql(null, $" \r\n{sql2}");
+            return ret;
+        }
+        public ISelect<T1> UnionAll(params ISelect<T1>[] querys)
+        {
+            var sql1 = this.ToSql();
+            var ret = (_orm as BaseDbProvider).CreateSelectProvider<T1>(null) as Select1Provider<T1>;
+            var sb = new StringBuilder().Append(this.ToSql());
+            foreach (var select2 in querys)
+                sb.Append(" \r\nUNION ALL \r\n").Append(select2.ToSql());
+            ret.WithSql(sb.ToString());
+            sb.Clear();
+            ret._commandTimeout = _commandTimeout;
+            ret._connection = _connection;
+            ret._transaction = _transaction;
+            ret._whereGlobalFilter = new List<GlobalFilter.Item>(_whereGlobalFilter.ToArray());
+            ret._cancel = _cancel;
+            ret._diymemexpWithTempQuery = _diymemexpWithTempQuery;
+            ret._tables[0] = _tables[0];
+            ret._params = _params;
             return ret;
         }
 
@@ -467,8 +492,10 @@ namespace FreeSql.Internal.CommonProvider
 
         public int InsertInto<TTargetEntity>(string tableName, Expression<Func<T1, TTargetEntity>> select) where TTargetEntity : class => base.InternalInsertInto<TTargetEntity>(tableName, select);
 
-        public ISelect<T1> IncludeByPropertyNameIf(bool condition, string property) => condition ? IncludeByPropertyName(property) : this;
-        public ISelect<T1> IncludeByPropertyName(string property)
+        public ISelect<T1> IncludeByPropertyNameIf(bool condition, string property) => condition ? IncludeByPropertyName(property, null) : this;
+        public ISelect<T1> IncludeByPropertyNameIf(bool condition, string property, Expression<Action<ISelect<object>>> then) => condition ? IncludeByPropertyName(property, then) : this;
+        public ISelect<T1> IncludeByPropertyName(string property) => IncludeByPropertyName(property, null);
+        public ISelect<T1> IncludeByPropertyName(string property, Expression<Action<ISelect<object>>> then)
         {
             var exp = ConvertStringPropertyToExpression(property, true);
             if (exp == null) throw new ArgumentException($"{CoreStrings.Cannot_Resolve_ExpressionTree(nameof(property))}");
@@ -483,11 +510,25 @@ namespace FreeSql.Internal.CommonProvider
                 case TableRefType.ManyToMany:
                 case TableRefType.OneToMany:
                 case TableRefType.PgArrayToMany:
-                    var funcType = typeof(Func<,>).MakeGenericType(_tables[0].Table.Type, typeof(IEnumerable<>).MakeGenericType(parTbref.RefEntityType));
+                    var funcType = typeof(Func<,>).MakeGenericType(typeof(T1), typeof(IEnumerable<>).MakeGenericType(parTbref.RefEntityType));
+                    if (_tables[0].Table.Type != typeof(T1))
+                    {
+                        var expParm = Expression.Parameter(typeof(T1), _tables[0].Alias);
+                        exp = new ReplaceMemberExpressionVisitor().Replace(exp, _tables[0].Parameter, Expression.Convert(expParm, _tables[0].Table.Type));
+                        _tables[0].Parameter = expParm;
+                    }
                     var navigateSelector = Expression.Lambda(funcType, exp, _tables[0].Parameter);
                     var incMethod = this.GetType().GetMethod("IncludeMany");
                     if (incMethod == null) throw new Exception(CoreStrings.RunTimeError_Reflection_IncludeMany);
-                    incMethod.MakeGenericMethod(parTbref.RefEntityType).Invoke(this, new object[] { navigateSelector, null });
+                    Delegate newthen = null;
+                    if (then != null)
+                    {
+                        var newthenParm = Expression.Parameter(typeof(ISelect<>).MakeGenericType(parTbref.RefEntityType));
+                        var newthenLambdaBody = new ReplaceIncludeByPropertyNameParameterVisitor().Modify(then, newthenParm);
+                        var newthenLambda = Expression.Lambda(typeof(Action<>).MakeGenericType(newthenParm.Type), newthenLambdaBody, newthenParm);
+                        newthen = newthenLambda.Compile();
+                    }
+                    incMethod.MakeGenericMethod(parTbref.RefEntityType).Invoke(this, new object[] { navigateSelector, newthen });
                     break;
                 case TableRefType.ManyToOne:
                 case TableRefType.OneToOne:
@@ -497,6 +538,35 @@ namespace FreeSql.Internal.CommonProvider
                     break;
             }
             return this;
+        }
+        public class ReplaceIncludeByPropertyNameParameterVisitor : ExpressionVisitor
+        {
+            private Expression _replaceExp;
+            private ParameterExpression oldParameter;
+            public Expression Modify(LambdaExpression lambda, Expression replaceExp)
+            {
+                this._replaceExp = replaceExp;
+                this.oldParameter = lambda.Parameters.FirstOrDefault();
+                return Visit(lambda.Body);
+            }
+            protected override Expression VisitMember(MemberExpression node)
+            {
+                if (node.Expression?.NodeType == ExpressionType.Parameter && node.Expression == oldParameter)
+                    return Expression.Property(_replaceExp, node.Member.Name);
+                return base.VisitMember(node);
+            }
+            protected override Expression VisitMethodCall(MethodCallExpression node)
+            {
+                if (node.Object?.Type == oldParameter.Type)
+                {
+                    var methodParameterTypes = node.Method.GetParameters().Select(a => a.ParameterType).ToArray();
+                    var method = _replaceExp.Type.GetMethod(node.Method.Name, methodParameterTypes);
+                    if (node.Object?.NodeType == ExpressionType.Parameter && node.Object == oldParameter)
+                        return Expression.Call(_replaceExp, method, node.Arguments);
+                    return Expression.Call(Visit(node.Object), method, node.Arguments);
+                }
+                return base.VisitMethodCall(node);
+            }
         }
 
         bool _isIncluded = false;
@@ -535,6 +605,15 @@ namespace FreeSql.Internal.CommonProvider
                         param = tmpExp as ParameterExpression;
                         isbreak = true;
                         break;
+                    case ExpressionType.Convert:
+                        var convertExp = tmpExp as UnaryExpression;
+                        if (convertExp?.Operand.NodeType == ExpressionType.Parameter)
+                        {
+                            param = convertExp.Operand as ParameterExpression;
+                            isbreak = true;
+                            break;
+                        }
+                        throw new Exception(CoreStrings.Expression_Error_Use_Successive_MemberAccess_Type(exp));
                     default:
                         throw new Exception(CoreStrings.Expression_Error_Use_Successive_MemberAccess_Type(exp));
                 }
@@ -724,6 +803,7 @@ namespace FreeSql.Internal.CommonProvider
                 var t1parm = Expression.Parameter(typeof(T1));
                 Expression membersExp = t1parm;
                 Expression membersExpNotNull = null;
+                if (typeof(T1) != _tables[0].Table.Type) membersExp = Expression.TypeAs(membersExp, _tables[0].Table.Type);
                 foreach (var mem in members)
                 {
                     membersExp = Expression.MakeMemberAccess(membersExp, mem.Member);
@@ -818,6 +898,7 @@ namespace FreeSql.Internal.CommonProvider
                     return getListValue1(item, propName);
                 };
 
+                if (list.Where(a => getListValue1(a, "") == null).Count() == list.Count) return; //Parent.Childs 当 parent 都是 NULL 就没有和要向下查询了
                 foreach (var item in list)
                     setListValue(item, null);
 

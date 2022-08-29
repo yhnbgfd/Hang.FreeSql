@@ -93,14 +93,18 @@ namespace FreeSql.Internal.CommonProvider
 
             if (lambParms == null)
             {
-                if (to._tables.Count <= from._tables.Count)
-                    to._tables = new List<SelectTableInfo>(from._tables.ToArray());
+                var fromParentTables = from._tables.Where(a => a.Type == SelectTableInfoType.Parent).ToList();
+                var fromTables = fromParentTables.Any() ? from._tables.Where(a => a.Type != SelectTableInfoType.Parent).ToList() : from._tables;
+                if (to._tables.Count <= fromTables.Count)
+                    to._tables = new List<SelectTableInfo>(fromTables);
                 else
                 {
                     to._tables = new List<SelectTableInfo>(to._tables);
-                    for (var a = 0; a < from._tables.Count; a++)
-                        to._tables[a] = from._tables[a];
+                    for (var a = 0; a < fromTables.Count; a++)
+                        to._tables[a] = fromTables[a];
                 }
+                if (fromParentTables.Any())
+                    to._tables.AddRange(fromParentTables);
             }
             else
             {
@@ -155,8 +159,11 @@ namespace FreeSql.Internal.CommonProvider
             public List<SelectTableInfo> _outsideTable = new List<SelectTableInfo>();
             public WithTempQueryParser(Select0Provider insideSelect, SelectGroupingProvider insideSelectGroup, Expression selector, SelectTableInfo outsideTable)
             {
-                _insideSelectList.Add(new InsideInfo(insideSelect, insideSelectGroup, selector));
-                _outsideTable.Add(outsideTable);
+                if (selector != null)
+                {
+                    _insideSelectList.Add(new InsideInfo(insideSelect, insideSelectGroup, selector));
+                    _outsideTable.Add(outsideTable);
+                }
             }
             public class InsideInfo
             {
@@ -223,7 +230,7 @@ namespace FreeSql.Internal.CommonProvider
                     ParseExpMapResult = read;
                     return $"{ParseExpMatchedTable.Alias}.{read.DbNestedField}";
                 }
-                for (var a = 0; a < members.Length; a++)
+                for (var a = members[0] == ParseExpMatchedTable.Parameter ? 1 : 0; a < members.Length; a++)
                 {
                     read = read.Childs.Where(z => z.CsName == (members[a] as MemberExpression)?.Member.Name).FirstOrDefault();
                     if (read == null) return null;
@@ -491,6 +498,8 @@ namespace FreeSql.Internal.CommonProvider
             protected override Expression VisitMember(MemberExpression node)
             {
                 if (_findExp == node) return _replaceExp;
+                if (node.Expression?.NodeType == ExpressionType.Parameter && node.Expression == _findExp)
+                    return Expression.Property(_replaceExp, node.Member.Name);
                 return base.VisitMember(node);
             }
         }
@@ -530,6 +539,11 @@ namespace FreeSql.Internal.CommonProvider
         {
             if (_transaction?.Connection != connection) _transaction = null;
             _connection = connection;
+            return this as TSelect;
+        }
+        public TSelect WithParameters(List<DbParameter> parameters)
+        {
+            if (parameters != null) _params = parameters;
             return this as TSelect;
         }
         public TSelect CommandTimeout(int timeout)
@@ -793,7 +807,7 @@ namespace FreeSql.Internal.CommonProvider
             var unions = new List<Dictionary<Type, string>>();
             var trs = _tableRules.Any() ? _tableRules : new List<Func<Type, string, string>>(new[] { new Func<Type, string, string>((type, oldname) => null) });
 
-            if (trs.Count == 1 && _tables.Any(a => a.Table.AsTableImpl != null && string.IsNullOrWhiteSpace(trs[0](a.Table.Type, a.Table.DbName)) == true))
+            if (trs.Count == 1 && _tables.Any(a => a.Table != null && a.Table.AsTableImpl != null && string.IsNullOrWhiteSpace(trs[0](a.Table.Type, a.Table.DbName)) == true))
             {
                 string[] LocalGetTableNames(SelectTableInfo tb)
                 {
@@ -1187,6 +1201,11 @@ namespace FreeSql.Internal.CommonProvider
             if (_orm.CodeFirst.IsAutoSyncStructure)
                 (_orm.CodeFirst as CodeFirstProvider)._dicSycedTryAdd(typeof(TDto)); //._dicSyced.TryAdd(typeof(TReturn), true);
             var ret = (_orm as BaseDbProvider).CreateSelectProvider<TDto>(null) as Select1Provider<TDto>;
+            ret._commandTimeout = _commandTimeout;
+            ret._connection = _connection;
+            ret._transaction = _transaction;
+            ret._whereGlobalFilter = new List<GlobalFilter.Item>(_whereGlobalFilter.ToArray());
+            ret._cancel = _cancel;
             ret._params.AddRange(_params);
             if (ret._tables[0].Table == null) ret._tables[0].Table = TableInfo.GetDefaultTable(typeof(TDto));
             var parser = new WithTempQueryParser(this, null, selector, ret._tables[0]);
@@ -1233,7 +1252,20 @@ namespace FreeSql.Internal.CommonProvider
         public List<T1> ToList() => ToList(false);
         public virtual List<T1> ToList(bool includeNestedMembers)
         {
-            if (_diymemexpWithTempQuery != null) return this.ToListMapReaderPrivate<T1>((_diymemexpWithTempQuery as WithTempQueryParser)._insideSelectList[0].InsideAf, null);
+            if (_diymemexpWithTempQuery != null && _diymemexpWithTempQuery is WithTempQueryParser withTempQueryParser)
+            {
+                if (withTempQueryParser._outsideTable[0] != _tables[0])
+                {
+                    var tps = _tables.Select(a =>
+                    {
+                        var tp = Expression.Parameter(a.Table.Type, a.Alias);
+                        a.Parameter = tp;
+                        return tp;
+                    }).ToArray();
+                    return this.InternalToList<T1>(tps[0]);
+                }
+                return this.ToListMapReaderPrivate<T1>(withTempQueryParser._insideSelectList[0].InsideAf, null);
+            }
             if (_selectExpression != null) return this.InternalToList<T1>(_selectExpression);
             return this.ToListPrivate(includeNestedMembers == false ? this.GetAllFieldExpressionTreeLevel2() : this.GetAllFieldExpressionTreeLevelAll(), null);
         }
@@ -1278,7 +1310,20 @@ namespace FreeSql.Internal.CommonProvider
         public Task<List<T1>> ToListAsync(CancellationToken cancellationToken = default) => ToListAsync(false, cancellationToken);
         public virtual Task<List<T1>> ToListAsync(bool includeNestedMembers = false, CancellationToken cancellationToken = default)
         {
-            if (_diymemexpWithTempQuery != null) return this.ToListMapReaderPrivateAsync<T1>((_diymemexpWithTempQuery as WithTempQueryParser)._insideSelectList[0].InsideAf, null, cancellationToken);
+            if (_diymemexpWithTempQuery != null && _diymemexpWithTempQuery is WithTempQueryParser withTempQueryParser)
+            {
+                if (withTempQueryParser._outsideTable[0] != _tables[0])
+                {
+                    var tps = _tables.Select(a =>
+                    {
+                        var tp = Expression.Parameter(a.Table.Type, a.Alias);
+                        a.Parameter = tp;
+                        return tp;
+                    }).ToArray();
+                    return this.InternalToListAsync<T1>(tps[0], cancellationToken);
+                }
+                return this.ToListMapReaderPrivateAsync<T1>((_diymemexpWithTempQuery as WithTempQueryParser)._insideSelectList[0].InsideAf, null, cancellationToken);
+            }
             if (_selectExpression != null) return this.InternalToListAsync<T1>(_selectExpression, cancellationToken);
             return this.ToListPrivateAsync(includeNestedMembers == false ? this.GetAllFieldExpressionTreeLevel2() : this.GetAllFieldExpressionTreeLevelAll(), null, cancellationToken);
         }
