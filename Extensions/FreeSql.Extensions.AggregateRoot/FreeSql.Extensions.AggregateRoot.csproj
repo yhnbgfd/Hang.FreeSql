@@ -1,15 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>netstandard2.0;net45;net40</TargetFrameworks>
+		<TargetFrameworks>netstandard2.0;net60;net50;netcoreapp31;netcoreapp21;net45;net40</TargetFrameworks>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<Authors>FreeSql;ncc;YeXiangQin</Authors>
-		<Description>BaseEntity 是一种极简单的 CodeFirst 开发方式，特别对单表或多表CRUD，利用继承节省了每个实体类的重复属性（创建时间、ID等字段），软件删除等功能，进行 crud 操作时不必时常考虑仓储的使用.</Description>
-		<PackageProjectUrl>https://github.com/dotnetcore/FreeSql/tree/master/Extensions/FreeSql.Extensions.BaseEntity</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/dotnetcore/FreeSql/tree/master/Extensions/FreeSql.Extensions.BaseEntity</RepositoryUrl>
+		<Description>FreeSql 扩展包，聚合根（实现室）.</Description>
+		<PackageProjectUrl>https://github.com/dotnetcore/FreeSql/wiki/%E8%81%9A%E5%90%88%E6%A0%B9%EF%BC%88%E5%AE%9E%E9%AA%8C%E5%AE%A4%EF%BC%89</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/dotnetcore/FreeSql/wiki/%E8%81%9A%E5%90%88%E6%A0%B9%EF%BC%88%E5%AE%9E%E9%AA%8C%E5%AE%A4%EF%BC%89</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageTags>FreeSql;ORM;BaseEntity</PackageTags>
+		<PackageTags>FreeSql;ORM</PackageTags>
 		<PackageId>$(AssemblyName)</PackageId>
 		<PackageIcon>logo.png</PackageIcon>
 		<Title>$(AssemblyName)</Title>
@@ -18,8 +18,7 @@
 		<SignAssembly>true</SignAssembly>
 		<AssemblyOriginatorKeyFile>key.snk</AssemblyOriginatorKeyFile>
 		<DelaySign>false</DelaySign>
-		<LangVersion>latest</LangVersion>
-		<Version>3.2.668</Version>
+		<Version>1.0.0</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -27,14 +26,14 @@
 	</ItemGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|netstandard2.0|AnyCPU'">
-		<DocumentationFile>FreeSql.Extensions.BaseEntity.xml</DocumentationFile>
+		<DocumentationFile>FreeSql.Extensions.AggregateRoot.xml</DocumentationFile>
 		<WarningLevel>3</WarningLevel>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\FreeSql.DbContext\FreeSql.DbContext.csproj" />
 	</ItemGroup>
-
+	
 	<PropertyGroup Condition="'$(TargetFramework)' == 'net40'">
 		<DefineConstants>net40</DefineConstants>
 	</PropertyGroup>

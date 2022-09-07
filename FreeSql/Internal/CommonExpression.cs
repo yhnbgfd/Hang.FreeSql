@@ -198,10 +198,11 @@ namespace FreeSql.Internal
                         }
                         if (_tables?.Count > 1)
                         { //如果下级导航属性被 Include 过，则将他们也查询出来
-                            foreach (var memProp in tb.Properties.Values)
+                            foreach (var tr in tb.GetAllTableRef())
                             {
-                                var memtbref = tb.GetTableRef(memProp.Name, false);
-                                if (memtbref == null) continue;
+                                var memtbref = tr.Value;
+                                if (memtbref.Exception != null) continue;
+                                if (tb.Properties.TryGetValue(tr.Key, out var memProp) == false) continue;
                                 switch (memtbref.RefType)
                                 {
                                     case TableRefType.ManyToMany:
@@ -356,7 +357,9 @@ namespace FreeSql.Internal
                                 };
                                 parent.Childs.Add(child);
                                 if (dtTb.Parameter != null)
-                                    ReadAnonymousField(_tables, _tableRule, field, child, ref index, Expression.Property(dtTb.Parameter, dtTb.Table.Properties[trydtocol.CsName]), select, diymemexp, whereGlobalFilter, findIncludeMany, findSubSelectMany, isAllDtoMap);
+                                    ReadAnonymousField(_tables, _tableRule, field, child, ref index, Expression.Property(
+                                        dtTb.Parameter.Type == dtTb.Table.Type ? (Expression)dtTb.Parameter : Expression.TypeAs(dtTb.Parameter, dtTb.Table.Type),
+                                        dtTb.Table.Properties[trydtocol.CsName]), select, diymemexp, whereGlobalFilter, findIncludeMany, findSubSelectMany, isAllDtoMap);
                                 else
                                 {
                                     child.DbField = $"{dtTb.Alias}.{_common.QuoteSqlName(trydtocol.Attribute.Name)}";
@@ -475,7 +478,9 @@ namespace FreeSql.Internal
                                 };
                                 parent.Childs.Add(child);
                                 if (dtTb.Parameter != null)
-                                    ReadAnonymousField(_tables, _tableRule, field, child, ref index, Expression.Property(dtTb.Parameter, dtTb.Table.Properties[trydtocol.CsName]), select, diymemexp, whereGlobalFilter, findIncludeMany, findSubSelectMany, isAllDtoMap);
+                                    ReadAnonymousField(_tables, _tableRule, field, child, ref index, Expression.Property(
+                                        dtTb.Parameter.Type == dtTb.Table.Type ? (Expression)dtTb.Parameter : Expression.TypeAs(dtTb.Parameter, dtTb.Table.Type), 
+                                        dtTb.Table.Properties[trydtocol.CsName]), select, diymemexp, whereGlobalFilter, findIncludeMany, findSubSelectMany, isAllDtoMap);
                                 else
                                 {
                                     child.DbField = _common.RereadColumn(trydtocol, $"{dtTb.Alias}.{_common.QuoteSqlName(trydtocol.Attribute.Name)}");
@@ -1322,7 +1327,7 @@ namespace FreeSql.Internal
                                                 //if (args[a] == null) ExpressionLambdaToSql(call3Exp.Arguments[a], fsqltables, null, null, SelectTableInfoType.From, true);
                                             }
                                         }
-                                        var isSubSelectPdme = tsc._tables == null && tsc.diymemexp != null;
+                                        var isSubSelectPdme = tsc._tables == null && tsc.diymemexp != null || tsc.diymemexp is Select0Provider.WithTempQueryParser;
                                         try
                                         {
                                             if (isSubSelectPdme)
@@ -1730,6 +1735,8 @@ namespace FreeSql.Internal
                     }
                     if (callExp != null) return ExpressionLambdaToSql(callExp, tsc);
                     var diymemexps = new[] { tsc.diymemexp, tsc.subSelect001?._diymemexpWithTempQuery };
+                    if (_subSelectParentDiyMemExps.Value?.Any() == true) 
+                        diymemexps = diymemexps.Concat(_subSelectParentDiyMemExps.Value).ToArray();
                     foreach (var diymemexp in diymemexps)
                     {
                         if (diymemexp != null)
