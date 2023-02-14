@@ -31,6 +31,7 @@ namespace FreeSql.Internal.CommonProvider
             _tables = tables;
         }
 
+        public static ThreadLocal<string> _ParseExpOnlyDbField = new ThreadLocal<string>();
         public override string ParseExp(Expression[] members)
         {
             ParseExpMapResult = null;
@@ -52,7 +53,11 @@ namespace FreeSql.Internal.CommonProvider
                     }
                     ParseExpMapResult = read;
                     if (!_addFieldAlias) return read.DbField;
-                    if (_comonExp.EndsWithDbNestedField(read.DbField, read.DbNestedField) == false) return $"{read.DbField}{_comonExp._common.FieldAsAlias(read.DbNestedField)}";
+                    if (_comonExp.EndsWithDbNestedField(read.DbField, read.DbNestedField) == false)
+                    {
+                        _ParseExpOnlyDbField.Value = read.DbField;
+                        return $"{read.DbField}{_comonExp._common.FieldAsAlias(read.DbNestedField)}";
+                    }
                     return read.DbField;
                 case "Value":
                     var curtables = _tables;
@@ -247,6 +252,7 @@ namespace FreeSql.Internal.CommonProvider
             _addFieldAlias = true; //解决：[Column(Name = "flevel") 与属性名不一致时，嵌套查询 bug
             var old_field = _field;
             var fieldsb = new StringBuilder();
+            if (_map.Childs.Any() == false) fieldsb.Append(", ").Append(_map.DbField).Append(_comonExp.EndsWithDbNestedField(_map.DbField, _map.DbNestedField) ? "" : _comonExp._common.FieldAsAlias(_map.DbNestedField));
             foreach (var child in _map.GetAllChilds()) 
                 fieldsb.Append(", ").Append(child.DbField).Append(_comonExp.EndsWithDbNestedField(child.DbField, child.DbNestedField) ? "" : _comonExp._common.FieldAsAlias(child.DbNestedField));
             _field = fieldsb.ToString();

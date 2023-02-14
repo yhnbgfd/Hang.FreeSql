@@ -28,7 +28,14 @@ namespace FreeSql.Internal
         public abstract DbParameter AppendParamter(List<DbParameter> _params, string parameterName, ColumnInfo col, Type type, object value);
         public abstract DbParameter[] GetDbParamtersByObject(string sql, object obj);
         public abstract string FormatSql(string sql, params object[] args);
-        public abstract string QuoteSqlName(params string[] name);
+
+        public bool IsQuoteSqlName = true;
+        public string QuoteSqlName(params string[] name) {
+            if (IsQuoteSqlName) return QuoteSqlNameAdapter(name);
+            if (name == null) return "";
+            return string.Join(".", name);
+        }
+        public abstract string QuoteSqlNameAdapter(params string[] name);
         public abstract string TrimQuoteSqlName(string name);
         public abstract string[] SplitTableName(string name);
         public static string[] GetSplitTableNames(string name, char leftQuote, char rightQuote, int size)
@@ -50,6 +57,12 @@ namespace FreeSql.Internal
         public abstract string StringConcat(string[] objs, Type[] types);
         public abstract string Mod(string left, string right, Type leftType, Type rightType);
         public abstract string Div(string left, string right, Type leftType, Type rightType);
+        public virtual string BitAnd(string left, string right) => $"({left} & {right})";
+        public virtual string BitOr(string left, string right) => $"({left} | {right})";
+        public virtual string BitShiftLeft(string left, string right) => $"({left} << {right})";
+        public virtual string BitShiftRight(string left, string right) => $"({left} >> {right})";
+        public virtual string BitNot(string left) => $"~{left}";
+        public virtual string BitXor(string left, string right) => $"({left} ^ {right})";
         public abstract string Now { get; }
         public abstract string NowUtc { get; }
         public abstract string QuoteWriteParamterAdapter(Type type, string paramterName);
@@ -113,6 +126,7 @@ namespace FreeSql.Internal
         }
 
         public MappingPriorityType[] _mappingPriorityTypes = new[] { MappingPriorityType.Aop, MappingPriorityType.FluentApi, MappingPriorityType.Attribute };
+        ConcurrentDictionary<Type, Dictionary<string, IndexAttribute>> dicAopConfigEntityIndex = new ConcurrentDictionary<Type, Dictionary<string, IndexAttribute>>();
         public TableAttribute GetEntityTableAttribute(Type type)
         {
             var attr = new TableAttribute();
@@ -123,13 +137,31 @@ namespace FreeSql.Internal
                     case MappingPriorityType.Aop:
                         if (_orm.Aop.ConfigEntityHandler != null)
                         {
-                            var aope = new Aop.ConfigEntityEventArgs(type);
-                            _orm.Aop.ConfigEntityHandler(_orm, aope);
+                            var aope = new Aop.ConfigEntityEventArgs(type)
+                            {
+                                ModifyResult = new TableAttribute
+                                {
+                                    Name = attr.Name ?? type.Name,
+                                    OldName = attr.OldName,
+                                    _DisableSyncStructure = attr._DisableSyncStructure,
+                                    AsTable = attr.AsTable
+                                }
+                            };
+                            _orm.Aop.ConfigEntityHandler(_orm, aope); 
                             var tryattr = aope.ModifyResult;
-                            if (!string.IsNullOrEmpty(tryattr.Name)) attr.Name = tryattr.Name;
+                            if (!string.IsNullOrEmpty(tryattr.Name) && tryattr.Name != type.Name) attr.Name = tryattr.Name;
                             if (!string.IsNullOrEmpty(tryattr.OldName)) attr.OldName = tryattr.OldName;
                             if (tryattr._DisableSyncStructure != null) attr._DisableSyncStructure = tryattr.DisableSyncStructure;
                             if (!string.IsNullOrEmpty(tryattr.AsTable)) attr.AsTable = tryattr.AsTable;
+
+                            var indexs = new Dictionary<string, IndexAttribute>();
+                            foreach (var idxattr in aope.ModifyIndexResult)
+                                if (!string.IsNullOrEmpty(idxattr.Name) && !string.IsNullOrEmpty(idxattr.Fields))
+                                {
+                                    if (indexs.ContainsKey(idxattr.Name)) indexs.Remove(idxattr.Name);
+                                    indexs.Add(idxattr.Name, new IndexAttribute(idxattr.Name, idxattr.Fields) { _IsUnique = idxattr._IsUnique });
+                                }
+                            dicAopConfigEntityIndex.AddOrUpdate(type, indexs, (_, old) => indexs);
                         }
                         break;
                     case MappingPriorityType.FluentApi:
@@ -171,10 +203,34 @@ namespace FreeSql.Internal
                     case MappingPriorityType.Aop:
                         if (_orm.Aop.ConfigEntityPropertyHandler != null)
                         {
-                            var aope = new Aop.ConfigEntityPropertyEventArgs(type, proto);
+                            var aope = new Aop.ConfigEntityPropertyEventArgs(type, proto)
+                            {
+                                ModifyResult = new ColumnAttribute
+                                {
+                                    Name = attr.Name ?? proto.Name,
+                                    OldName = attr.OldName,
+                                    DbType = attr.DbType,
+                                    _IsPrimary = attr._IsPrimary,
+                                    _IsIdentity = attr._IsIdentity,
+                                    _IsNullable = attr._IsNullable,
+                                    _IsIgnore = attr._IsIgnore,
+                                    _IsVersion = attr._IsVersion,
+                                    MapType = attr.MapType,
+                                    _Position = attr._Position,
+                                    _CanInsert = attr._CanInsert,
+                                    _CanUpdate = attr._CanUpdate,
+                                    ServerTime = attr.ServerTime,
+                                    _StringLength = attr._StringLength,
+                                    InsertValueSql = attr.InsertValueSql,
+                                    _Precision = attr._Precision,
+                                    _Scale = attr._Scale,
+                                    RewriteSql = attr.RewriteSql,
+                                    RereadSql = attr.RereadSql
+                                }
+                            };
                             _orm.Aop.ConfigEntityPropertyHandler(_orm, aope);
                             var tryattr = aope.ModifyResult;
-                            if (!string.IsNullOrEmpty(tryattr.Name)) attr.Name = tryattr.Name;
+                            if (!string.IsNullOrEmpty(tryattr.Name) && tryattr.Name != proto.Name) attr.Name = tryattr.Name;
                             if (!string.IsNullOrEmpty(tryattr.OldName)) attr.OldName = tryattr.OldName;
                             if (!string.IsNullOrEmpty(tryattr.DbType)) attr.DbType = tryattr.DbType;
                             if (tryattr._IsPrimary != null) attr._IsPrimary = tryattr.IsPrimary;
@@ -324,11 +380,9 @@ namespace FreeSql.Internal
                 switch (mp)
                 {
                     case MappingPriorityType.Aop:
-                        if (_orm.Aop.ConfigEntityHandler != null)
+                        if (dicAopConfigEntityIndex.TryGetValue(type, out var tryidxs))
                         {
-                            var aope = new Aop.ConfigEntityEventArgs(type);
-                            _orm.Aop.ConfigEntityHandler(_orm, aope);
-                            foreach (var idxattr in aope.ModifyIndexResult)
+                            foreach (var idxattr in tryidxs.Values)
                                 if (!string.IsNullOrEmpty(idxattr.Name) && !string.IsNullOrEmpty(idxattr.Fields))
                                 {
                                     if (ret.ContainsKey(idxattr.Name)) ret.Remove(idxattr.Name);

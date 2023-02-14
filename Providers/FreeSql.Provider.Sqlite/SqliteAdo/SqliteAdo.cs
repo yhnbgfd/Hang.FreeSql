@@ -24,6 +24,7 @@ namespace FreeSql.Sqlite
             if (connectionFactory != null)
             {
                 var pool = new FreeSql.Internal.CommonProvider.DbConnectionPool(DataType.Sqlite, connectionFactory);
+                ConnectionString = pool.TestConnection?.ConnectionString;
                 MasterPool = pool;
                 _CreateCommandConnection = pool.TestConnection;
                 return;
@@ -58,7 +59,7 @@ namespace FreeSql.Sqlite
             else if (param is DateTime || param is DateTime?)
                 return string.Concat("'", ((DateTime)param).ToString("yyyy-MM-dd HH:mm:ss"), "'");
             else if (param is TimeSpan || param is TimeSpan?)
-                return ((TimeSpan)param).Ticks / 10000;
+                return ((TimeSpan)param).TotalSeconds;
             else if (param is byte[])
                 return string.Concat("'", Encoding.UTF8.GetString(param as byte[]), "'");
             else if (param is IEnumerable)

@@ -483,7 +483,11 @@ namespace FreeSql.Internal.CommonProvider
                             var curPropName = parentNameSplits[k];
                             if (curTb.Table.Properties.TryGetValue(parentNameSplits[k], out var tryprop) == false)
                             {
-                                k++;
+                                if (++k >= parentNameSplits.Length)
+                                {
+                                    iscontinue = true;
+                                    break;
+                                }
                                 curPropName = $"{curPropName}__{parentNameSplits[k]}";
                                 if (curTb.Table.Properties.TryGetValue(parentNameSplits[k], out tryprop) == false)
                                 {
@@ -628,7 +632,7 @@ namespace FreeSql.Internal.CommonProvider
                             a.Alias.StartsWith($"{tb.Alias}__") && //开头结尾完全匹配
                             a.Alias.EndsWith($"__{prop.Name}") //不清楚会不会有其他情况 求大佬优化
                             ).FirstOrDefault(); //判断 b > 0 防止 parent 递归关系
-                        if (tb2 == null && props.Where(pw => pw.Value.PropertyType == prop.PropertyType).Count() == 1)
+                        if (tb2 == null && props.Where(pw => pw.Value.PropertyType == prop.PropertyType).Take(2).Count() == 1)
                             tb2 = _tables.Where((a, b) => b > 0 &&
                                 (a.Type == SelectTableInfoType.InnerJoin || a.Type == SelectTableInfoType.LeftJoin || a.Type == SelectTableInfoType.RightJoin) &&
                                 string.IsNullOrEmpty(a.On) == false &&
@@ -835,7 +839,7 @@ namespace FreeSql.Internal.CommonProvider
             _commonExpression.ExpressionJoinLambda(_tables, _tableRule, joinType, exp, _diymemexpWithTempQuery, _whereGlobalFilter);
             return this as TSelect;
         }
-        protected TSelect InternalOrderBy(Expression column)
+        public TSelect InternalOrderBy(Expression column)
         {
             if (column.NodeType == ExpressionType.Lambda) column = (column as LambdaExpression)?.Body;
             switch (column?.NodeType)
@@ -848,7 +852,7 @@ namespace FreeSql.Internal.CommonProvider
             }
             return this.OrderBy(_commonExpression.ExpressionSelectColumn_MemberAccess(_tables, _tableRule, null, SelectTableInfoType.From, column, true, _diymemexpWithTempQuery));
         }
-        protected TSelect InternalOrderByDescending(Expression column)
+        public TSelect InternalOrderByDescending(Expression column)
         {
             if (column.NodeType == ExpressionType.Lambda) column = (column as LambdaExpression)?.Body;
             switch (column?.NodeType)

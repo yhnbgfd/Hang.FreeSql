@@ -22,8 +22,12 @@ public static partial class FreeSqlGlobalExtensions
 {
 #if net40
 #else
-    static readonly Lazy<PropertyInfo> _TaskReflectionResultPropertyLazy = new Lazy<PropertyInfo>(() => typeof(Task).GetProperty("Result"));
-    internal static object GetTaskReflectionResult(this Task task) => _TaskReflectionResultPropertyLazy.Value.GetValue(task, new object[0]);
+    internal static object GetTaskReflectionResult(this Task task)
+    {
+        var propResult = task?.GetType().GetProperty("Result");
+        if (propResult != null) return propResult.GetValue(task, new object[0]);
+        return null;
+    }
 #endif
 
     #region Type 对象扩展方法
@@ -872,6 +876,7 @@ SELECT ");
     /// <returns></returns>
     public static InsertDictImpl InsertDict(this IFreeSql freesql, Dictionary<string, object> source)
     {
+        LocalReplaceDictDBNullValue(source);
         var insertDict = new InsertDictImpl(freesql);
         insertDict._insertProvider.AppendData(source);
         return insertDict;
@@ -883,9 +888,20 @@ SELECT ");
     /// <returns></returns>
     public static InsertDictImpl InsertDict(this IFreeSql freesql, IEnumerable<Dictionary<string, object>> source)
     {
+        if (source?.Any() == true) foreach (var dict in source) LocalReplaceDictDBNullValue(dict);
         var insertDict = new InsertDictImpl(freesql);
         insertDict._insertProvider.AppendData(source);
         return insertDict;
+    }
+    static void LocalReplaceDictDBNullValue(Dictionary<string, object> dict)
+    {
+        if (dict == null) return;
+        var keys = dict.Keys.ToArray();
+        foreach (var key in keys)
+        {
+            var val = dict[key];
+            if (val == DBNull.Value) dict[key] = null;
+        }
     }
     /// <summary>
     /// 更新数据字典 Dictionary&lt;string, object&gt;
@@ -894,6 +910,7 @@ SELECT ");
     /// <returns></returns>
     public static UpdateDictImpl UpdateDict(this IFreeSql freesql, Dictionary<string, object> source)
     {
+        LocalReplaceDictDBNullValue(source);
         var updateDict = new UpdateDictImpl(freesql);
         updateDict._updateProvider.SetSource(source);
         return updateDict;
@@ -905,6 +922,7 @@ SELECT ");
     /// <returns></returns>
     public static UpdateDictImpl UpdateDict(this IFreeSql freesql, IEnumerable<Dictionary<string, object>> source)
     {
+        if (source?.Any() == true) foreach (var dict in source) LocalReplaceDictDBNullValue(dict);
         var updateDict = new UpdateDictImpl(freesql);
         updateDict._updateProvider.SetSource(source);
         return updateDict;
@@ -925,12 +943,14 @@ SELECT ");
     /// <returns></returns>
     public static InsertOrUpdateDictImpl InsertOrUpdateDict(this IFreeSql freesql, Dictionary<string, object> source)
     {
+        LocalReplaceDictDBNullValue(source);
         var insertOrUpdateDict = new InsertOrUpdateDictImpl(freesql);
         insertOrUpdateDict._insertOrUpdateProvider.SetSource(source);
         return insertOrUpdateDict;
     }
     public static InsertOrUpdateDictImpl InsertOrUpdateDict(this IFreeSql freesql, IEnumerable<Dictionary<string, object>> source)
     {
+        if (source?.Any() == true) foreach (var dict in source) LocalReplaceDictDBNullValue(dict);
         var insertOrUpdateDict = new InsertOrUpdateDictImpl(freesql);
         insertOrUpdateDict._insertOrUpdateProvider.SetSource(source);
         return insertOrUpdateDict;
@@ -942,6 +962,7 @@ SELECT ");
     /// <returns></returns>
     public static DeleteDictImpl DeleteDict(this IFreeSql freesql, Dictionary<string, object> source)
     {
+        LocalReplaceDictDBNullValue(source);
         var deleteDict = new DeleteDictImpl(freesql);
         UpdateProvider<Dictionary<string, object>>.GetDictionaryTableInfo(source, deleteDict._deleteProvider._orm, ref deleteDict._deleteProvider._table);
         var primarys = UpdateDictImpl.GetPrimarys(deleteDict._deleteProvider._table, source.Keys.ToArray());
@@ -955,6 +976,7 @@ SELECT ");
     /// <returns></returns>
     public static DeleteDictImpl DeleteDict(this IFreeSql freesql, IEnumerable<Dictionary<string, object>> source)
     {
+        if (source?.Any() == true) foreach (var dict in source) LocalReplaceDictDBNullValue(dict);
         DeleteDictImpl deleteDict = null;
         if (source.Select(a => string.Join(",", a.Keys)).Distinct().Count() == 1)
         {
@@ -1072,6 +1094,18 @@ SELECT ");
                 else throw new Exception(CoreStrings.GetPrimarys_ParameterError_IsNotDictKey(primary));
             }
             table.Primarys = table.Columns.Where(a => a.Value.Attribute.IsPrimary).Select(a => a.Value).ToArray();
+        }
+        public UpdateDictImpl IsVersion(string version)
+        {
+            if (_updateProvider._table.ColumnsByCs.TryGetValue(version, out var col) == false)
+                throw new Exception(CoreStrings.GetPrimarys_ParameterError_IsNotDictKey(version).Replace(nameof(GetPrimarys), ""));
+            //if (col.Attribute.MapType.IsNullableType() ||
+            //    col.Attribute.MapType.IsNumberType() == false && !new[] { typeof(byte[]), typeof(string) }.Contains(col.Attribute.MapType))
+            //    throw new Exception(CoreStrings.Properties_AsRowLock_Must_Numeric_Byte(col.CsName));
+            col.Attribute.IsVersion = true;
+            _updateProvider._table.VersionColumn = col;
+            _updateProvider._versionColumn = col;
+            return this;
         }
 
         public UpdateDictImpl AsTable(string tableName)
@@ -1228,5 +1262,41 @@ SELECT ");
 
     #endregion
 
-
+    #region Ado.QuerySingle(() => new { DateTime.Now })
+    public static T1 QuerySingle<T1>(this IAdo ado, Expression<Func<T1>> selector)
+    {
+        var nt = SelectNoTable((ado as AdoProvider)?._util._orm, selector);
+        return nt.Item1.ToListMrPrivate<T1>(nt.Item3, nt.Item2, null).FirstOrDefault();
+    }
+#if net40
+#else
+    async public static Task<T1> QuerySingleAsync<T1>(this IAdo ado, Expression<Func<T1>> selector, CancellationToken cancellationToken = default)
+    {
+        var nt = SelectNoTable((ado as AdoProvider)?._util._orm, selector);
+        var result = await nt.Item1.ToListMrPrivateAsync<T1>(nt.Item3, nt.Item2, null, cancellationToken);
+        return result.FirstOrDefault();
+    }
+#endif
+    static NativeTuple<Select1Provider<object>, ReadAnonymousTypeAfInfo, string> SelectNoTable(IFreeSql fsql, Expression selector)
+    {
+        var query = fsql.Select<object>() as Select1Provider<object>;
+        var af = query.GetExpressionField(selector);
+        var sql = "";
+        switch (fsql.Ado.DataType)
+        {
+            case DataType.Oracle:
+            case DataType.OdbcOracle:
+            case DataType.GBase:
+                sql = $" SELECT {af.field} FROM dual";
+                break;
+            case DataType.Firebird:
+                sql = $" SELECT FIRST 1 {af.field} FROM rdb$database";
+                break;
+            default:
+                sql = $" SELECT {af.field}";
+                break;
+        }
+        return NativeTuple.Create(query, af, sql);
+    }
+    #endregion
 }

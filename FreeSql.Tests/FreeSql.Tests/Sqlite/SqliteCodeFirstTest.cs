@@ -335,7 +335,7 @@ namespace FreeSql.Tests.Sqlite
                 ShortNullable = short.MinValue,
                 String = "我是中国人string'\\?!@#$%^&*()_+{}}{~?><<>",
                 Char = 'X',
-                TimeSpan = TimeSpan.FromSeconds(999),
+                TimeSpan = TimeSpan.FromMilliseconds(999500),
                 TimeSpanNullable = TimeSpan.FromSeconds(60),
                 UInt = uint.MaxValue,
                 UIntNullable = uint.MinValue,
@@ -347,6 +347,7 @@ namespace FreeSql.Tests.Sqlite
             };
             item2.Id = (int)insert.AppendData(item2).ExecuteIdentity();
             var newitem2 = select.Where(a => a.Id == item2.Id).ToOne();
+            var newitem2TimeSpan = select.Where(a => a.Id == item2.Id).First(a => a.TimeSpan);
             Assert.Equal(item2.String, newitem2.String);
             Assert.Equal(item2.Char, newitem2.Char);
 

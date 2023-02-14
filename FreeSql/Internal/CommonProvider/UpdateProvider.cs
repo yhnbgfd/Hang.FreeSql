@@ -1,12 +1,12 @@
 ﻿using FreeSql.Extensions.EntityUtil;
 using FreeSql.Internal.Model;
+using FreeSql.Internal.ObjectPool;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -38,6 +38,96 @@ namespace FreeSql.Internal.CommonProvider
         public int _commandTimeout = 0;
         public Action<StringBuilder> _interceptSql;
         public object _updateVersionValue;
+        public bool _isAutoSyncStructure;
+
+
+        public static int ExecuteBulkUpdate<T1>(UpdateProvider<T1> update, NativeTuple<string, string, string, string, string[]> state, Action<IInsert<T1>> funcBulkCopy) where T1 : class
+        {
+            if (update._source.Any() != true || update._tempPrimarys.Any() == false) return 0;
+            var fsql = update._orm;
+            var connection = update._connection;
+            var transaction = update._transaction;
+
+            Object<DbConnection> poolConn = null;
+            if (connection == null)
+            {
+                poolConn = fsql.Ado.MasterPool.Get();
+                connection = poolConn.Value;
+            }
+            try
+            {
+                var droped = false;
+                fsql.Ado.CommandFluent(state.Item1).WithConnection(connection).WithTransaction(transaction).ExecuteNonQuery();
+                try
+                {
+                    var insert = fsql.Insert<T1>(update._source)
+                        .AsType(update._table.Type)
+                        .WithConnection(connection)
+                        .WithTransaction(transaction)
+                        .InsertIdentity()
+                        .InsertColumns(state.Item5)
+                        .AsTable(state.Item4);
+                    (insert as InsertProvider)._isAutoSyncStructure = false;
+                    funcBulkCopy(insert);
+                    var affrows = fsql.Ado.CommandFluent(state.Item2 + ";\r\n" + state.Item3).WithConnection(connection).WithTransaction(transaction).ExecuteNonQuery();
+                    droped = true;
+                    return affrows;
+                }
+                finally
+                {
+                    if (droped == false) fsql.Ado.CommandFluent(state.Item3).WithConnection(connection).WithTransaction(transaction).ExecuteNonQuery();
+                }
+            }
+            finally
+            {
+                poolConn?.Dispose();
+            }
+        }
+#if net40
+#else
+        async public static Task<int> ExecuteBulkUpdateAsync<T1>(UpdateProvider<T1> update, NativeTuple<string, string, string, string, string[]> state, Func<IInsert<T1>, Task> funcBulkCopy) where T1 : class
+        {
+            if (update._source.Any() != true || update._tempPrimarys.Any() == false) return 0;
+            var fsql = update._orm;
+            var connection = update._connection;
+            var transaction = update._transaction;
+
+            Object<DbConnection> poolConn = null;
+            if (connection == null)
+            {
+                poolConn = await fsql.Ado.MasterPool.GetAsync();
+                connection = poolConn.Value;
+            }
+            try
+            {
+                var droped = false;
+                await fsql.Ado.CommandFluent(state.Item1).WithConnection(connection).WithTransaction(transaction).ExecuteNonQueryAsync();
+                try
+                {
+                    var insert = fsql.Insert<T1>(update._source)
+                        .AsType(update._table.Type)
+                        .WithConnection(connection)
+                        .WithTransaction(transaction)
+                        .InsertIdentity()
+                        .InsertColumns(state.Item5)
+                        .AsTable(state.Item4);
+                    (insert as InsertProvider)._isAutoSyncStructure = false;
+                    await funcBulkCopy(insert);
+                    var affrows = await fsql.Ado.CommandFluent(state.Item2 + ";\r\n" + state.Item3).WithConnection(connection).WithTransaction(transaction).ExecuteNonQueryAsync();
+                    droped = true;
+                    return affrows;
+                }
+                finally
+                {
+                    if (droped == false) await fsql.Ado.CommandFluent(state.Item3).WithConnection(connection).WithTransaction(transaction).ExecuteNonQueryAsync();
+                }
+            }
+            finally
+            {
+                poolConn?.Dispose();
+            }
+        }
+#endif
     }
 
     public abstract partial class UpdateProvider<T1> : UpdateProvider, IUpdate<T1>
@@ -55,8 +145,9 @@ namespace FreeSql.Internal.CommonProvider
             _tempPrimarys = _table?.Primarys ?? new ColumnInfo[0];
             _versionColumn = _table?.VersionColumn;
             _noneParameter = _orm.CodeFirst.IsNoneCommandParameter;
+            _isAutoSyncStructure = _orm.CodeFirst.IsAutoSyncStructure;
             this.Where(_commonUtils.WhereObject(_table, "", dywhere));
-            if (_orm.CodeFirst.IsAutoSyncStructure && typeof(T1) != typeof(object)) _orm.CodeFirst.SyncStructure<T1>();
+            if (_isAutoSyncStructure && typeof(T1) != typeof(object)) _orm.CodeFirst.SyncStructure<T1>();
             IgnoreCanUpdate();
             _whereGlobalFilter = _orm.GlobalFilter.GetFilters();
             _sourceOld = _source;
@@ -96,7 +187,7 @@ namespace FreeSql.Internal.CommonProvider
         public IUpdate<T1> WithTransaction(DbTransaction transaction)
         {
             _transaction = transaction;
-            _connection = _transaction?.Connection;
+            if (transaction != null) _connection = transaction.Connection;
             return this;
         }
         public IUpdate<T1> WithConnection(DbConnection connection)
@@ -139,7 +230,24 @@ namespace FreeSql.Internal.CommonProvider
                     throw new DbUpdateVersionException(CoreStrings.DbUpdateVersionException_RowLevelOptimisticLock(_source.Count, affrows), _table, sql, dbParms, affrows, _source.Select(a => (object)a));
                 foreach (var d in _source)
                 {
-                    if (_versionColumn.Attribute.MapType == typeof(byte[])) 
+                    if (d is Dictionary<string, object> dict)
+                    {
+                        if (dict.ContainsKey(_versionColumn.CsName))
+                        {
+                            var val = dict[_versionColumn.CsName];
+                            if (val == null) continue;
+                            var valType = val.GetType();
+
+                            if (valType == typeof(byte[]))
+                                dict[_versionColumn.CsName] = _updateVersionValue;
+                            else if (valType == typeof(string))
+                                dict[_versionColumn.CsName] = _updateVersionValue;
+                            else if (int.TryParse(string.Concat(val), out var tryintver))
+                                dict[_versionColumn.CsName] = tryintver + 1;
+                        }
+                        continue;
+                    }
+                    if (_versionColumn.Attribute.MapType == typeof(byte[]))
                         _orm.SetEntityValueWithPropertyName(_table.Type, d, _versionColumn.CsName, _updateVersionValue);
                     else if (_versionColumn.Attribute.MapType == typeof(string))
                         _orm.SetEntityValueWithPropertyName(_table.Type, d, _versionColumn.CsName, _updateVersionValue);
@@ -462,8 +570,10 @@ namespace FreeSql.Internal.CommonProvider
                 var tempDict = new Dictionary<string, object>();
                 foreach (var item in dicType)
                     foreach (string key in item.Keys)
-                        if (!tempDict.ContainsKey(key) && !(item[key] is null))
-                            tempDict[key] = item[key];
+                    {
+                        if (!tempDict.ContainsKey(key)) tempDict[key] = item[key];
+                        else if (!(item[key] is null)) tempDict[key] = item[key];
+                    }
                 UpdateProvider<Dictionary<string, object>>.GetDictionaryTableInfo(tempDict, orm, ref table);
                 return;
             }
@@ -736,7 +846,9 @@ namespace FreeSql.Internal.CommonProvider
                 var sb = new StringBuilder();
                 sb.Append(_commonUtils.QuoteSqlName(col.Attribute.Name)).Append(" = ");
 
-                var nulls = 0;
+                string valsqlOld = null;
+                var valsqlOldStats = 1; //start 1
+                var nullStats = 0;
                 var cwsb = new StringBuilder().Append(cw);
                 foreach (var d in _source)
                 {
@@ -744,11 +856,15 @@ namespace FreeSql.Internal.CommonProvider
                     ToSqlWhen(cwsb, _tempPrimarys, d);
                     cwsb.Append(" THEN ");
                     var val = col.GetDbValue(d);
-                    cwsb.Append(thenValue(_commonUtils.RewriteColumn(col, _commonUtils.GetNoneParamaterSqlValue(_paramsSource, "u", col, col.Attribute.MapType, val))));
-                    if (val == null || val == DBNull.Value) nulls++;
+                    var valsql = thenValue(_commonUtils.RewriteColumn(col, _commonUtils.GetNoneParamaterSqlValue(_paramsSource, "u", col, col.Attribute.MapType, val)));
+                    cwsb.Append(valsql);
+                    if (valsqlOld == null) valsqlOld = valsql;
+                    else if (valsqlOld == valsql) valsqlOldStats++;
+                    if (val == null || val == DBNull.Value) nullStats++;
                 }
                 cwsb.Append(" END");
-                if (nulls == _source.Count) sb.Append("NULL");
+                if (nullStats == _source.Count) sb.Append("NULL");
+                else if (valsqlOldStats == _source.Count) sb.Append(valsqlOld);
                 else sb.Append(cwsb);
                 cwsb.Clear();
 
@@ -779,7 +895,7 @@ namespace FreeSql.Internal.CommonProvider
             if (string.IsNullOrEmpty(newname)) return _table.DbName;
             if (_orm.CodeFirst.IsSyncStructureToLower) newname = newname.ToLower();
             if (_orm.CodeFirst.IsSyncStructureToUpper) newname = newname.ToUpper();
-            if (_orm.CodeFirst.IsAutoSyncStructure) _orm.CodeFirst.SyncStructure(_table.Type, newname);
+            if (_isAutoSyncStructure) _orm.CodeFirst.SyncStructure(_table.Type, newname);
             return newname;
         }
         public IUpdate<T1> AsTable(Func<string, string> tableRule)
@@ -800,7 +916,7 @@ namespace FreeSql.Internal.CommonProvider
             _table = newtb ?? throw new Exception(CoreStrings.Type_AsType_Parameter_Error("IUpdate"));
             _tempPrimarys = _table.Primarys;
             _versionColumn = _ignoreVersion ? null : _table.VersionColumn;
-            if (_orm.CodeFirst.IsAutoSyncStructure) _orm.CodeFirst.SyncStructure(entityType);
+            if (_isAutoSyncStructure) _orm.CodeFirst.SyncStructure(entityType);
             IgnoreCanUpdate();
             return this;
         }
@@ -1013,16 +1129,22 @@ namespace FreeSql.Internal.CommonProvider
                 return;
 
             if (_setIncr.Length > 0)
-                sb.Append(_set.Length > 0 ? _setIncr.ToString() : _setIncr.ToString().Substring(2));
+                sb.Append(_set.Length > 0 || _source.Any() ? _setIncr.ToString() : _setIncr.ToString().Substring(2));
 
             if (_source.Any() == false)
             {
+                var sbString = "";
                 foreach (var col in _table.Columns.Values)
                     if (col.Attribute.CanUpdate && string.IsNullOrEmpty(col.DbUpdateValue) == false)
-                        sb.Append(", ").Append(_commonUtils.QuoteSqlName(col.Attribute.Name)).Append(" = ").Append(col.DbUpdateValue);
+                    {
+                        if (sbString == "") sbString = sb.ToString();
+                        var loc3 = _commonUtils.QuoteSqlName(col.Attribute.Name);
+                        if (sbString.Contains(loc3)) continue;
+                        sb.Append(", ").Append(loc3).Append(" = ").Append(col.DbUpdateValue);
+                    }
             }
 
-            if (_versionColumn != null)
+            if (_versionColumn != null && _versionColumn.Attribute.CanUpdate)
             {
                 var vcname = _commonUtils.QuoteSqlName(_versionColumn.Attribute.Name);
                 if (_versionColumn.Attribute.MapType == typeof(byte[]))

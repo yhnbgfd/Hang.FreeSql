@@ -95,6 +95,7 @@ namespace FreeSql
             var localAffrows = 0;
             try
             {
+                rootRepository.DbContextOptions.EnableCascadeSave = false;
                 return LocalInsert(rootRepository, rootEntitys, true);
             }
             finally
@@ -217,14 +218,11 @@ namespace FreeSql
             if (flagExists == true)
             {
                 var affrows = Update(entity);
-                if (affrows > 0) return entity;
+                return entity;
             }
             if (table.Primarys.Where(a => a.Attribute.IsIdentity).Count() == table.Primarys.Length)
-            {
                 Orm.ClearEntityPrimaryValueWithIdentity(EntityType, entity);
-                return Insert(entity);
-            }
-            throw new Exception(DbContextStrings.CannotAdd_PrimaryKey_NotSet(Orm.GetEntityString(EntityType, entity)));
+            return Insert(entity);
         }
 
         public virtual int Update(TEntity entity) => Update(new[] { entity });
@@ -237,10 +235,10 @@ namespace FreeSql
                 if (_states.TryGetValue(stateKey, out var state) == false) throw new Exception($"AggregateRootRepository 使用仓储对象查询后，才可以更新数据 {Orm.GetEntityString(EntityType, entity)}");
                 AggregateRootUtils.CompareEntityValue(_boundaryName, Orm, EntityType, state.Value, entity, null, tracking);
             }
+            var affrows = SaveTrackingChange(tracking);
             foreach (var entity in entitys)
                 Attach(entity);
-
-            return SaveTrackingChange(tracking);
+            return affrows;
         }
 
         public virtual int Delete(TEntity entity) => DeleteWithinBoundary(new[] { entity }, null);
@@ -284,8 +282,8 @@ namespace FreeSql
             var stateKey = Orm.GetEntityKeyString(EntityType, entity, false);
             if (_states.TryGetValue(stateKey, out var state) == false) throw new Exception($"AggregateRootRepository 使用仓储对象查询后，才可以保存数据 {Orm.GetEntityString(EntityType, entity)}");
             AggregateRootUtils.CompareEntityValue(_boundaryName, Orm, EntityType, state.Value, entity, propertyName, tracking);
-            Attach(entity); //应该只存储 propertyName 内容
             SaveTrackingChange(tracking);
+            Attach(entity); //应该只存储 propertyName 内容
         }
 
 
@@ -321,7 +319,8 @@ namespace FreeSql
                 UpdateColumns = b.Item4,
                 UpdateColumnsString = string.Join(",", b.Item4.OrderBy(c => c))
             }).ToArray());
-            var updateLogDict2 = updateLogDict.ToDictionary(a => a.Key, a => a.Value.ToDictionary(b => b.UpdateColumnsString, b => a.Value.Where(c => c.UpdateColumnsString == b.UpdateColumnsString).ToArray()));
+            var updateLogDict2 = updateLogDict.ToDictionary(a => a.Key, a =>
+                 a.Value.GroupBy(b => b.UpdateColumnsString).ToDictionary(b => b.Key, b => a.Value.Where(c => c.UpdateColumnsString == b.Key).ToArray()));
             foreach (var dl in updateLogDict2)
             {
                 foreach (var dl2 in dl.Value)

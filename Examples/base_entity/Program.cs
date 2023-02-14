@@ -1,8 +1,10 @@
 ﻿using FreeSql;
 using FreeSql.DataAnnotations;
 using FreeSql.Extensions;
+using FreeSql.Internal;
 using FreeSql.Internal.CommonProvider;
 using FreeSql.Internal.Model;
+using FreeSql.Odbc.Default;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
@@ -341,14 +343,152 @@ namespace base_entity
         {
             public int bb { get; set; }
         }
+        [Table(Name = "AAA_attr")]
+        [Index("xxx1", nameof(aa))]
+        [Index("xxx2", nameof(aa))]
         public class AAA
         {
+            [Column(Name = "aa_attr")]
             public int aa { get; set; }
         }
 
+        [Table(Name = "db2.sql_AAA_attr")]
+        [Index("{tablename}_xxx1", nameof(aa))]
+        [Index("{tablename}_xxx2", nameof(aa))]
+        public class SqliteAAA
+        {
+            [Column(Name = "aa_attr")]
+            public int aa { get; set; }
+        }
+
+        public class JoinConditionAttribute : Attribute
+        {
+            public string Condition { get; set; }
+            public JoinConditionAttribute(string condition) => Condition = condition;
+        }
+        public class JoinTest01
+        {
+            public int id { get; set; }
+            public string code { get; set; }
+            public string parentcode { get; set; }
+            public string name { get; set; }
+            [Column(MapType = typeof(string))]
+            public string JoinTest01Enum { get; set; }
+            [Column(MapType = typeof(int))]
+            public JoinTest01Enum JoinTest01Enum2 { get; set; }
+
+            [JoinCondition("a.parentcode = b.code")]
+            public JoinTest01 Parent { get; set; }
+        }
+        public enum JoinTest01Enum { f1, f2, f3 }
+
+        public class AccessOdbcAdapter : OdbcAdapter
+        {
+            public override string UnicodeStringRawSql(object value, ColumnInfo mapColumn) => value == null ? "NULL" : string.Concat("'", value.ToString().Replace("'", "''"), "'");
+        }
+        private static IFreeSql CreateInstance(string connectString, DataType type)
+        {
+            IFreeSql client = new FreeSqlBuilder()
+                .UseConnectionString(type, connectString)
+                .Build();
+            if (DataType.Odbc.Equals(type))
+            {
+                client.SetOdbcAdapter(new AccessOdbcAdapter());
+            }
+            return client;
+        }
+
+        class TJson01
+        {
+            public Guid id { get; set; }
+            [JsonMap]
+            public DJson02 Json02 { get; set; }
+            [JsonMap]
+            public DJson02 Json03 { get; set; }
+        }
+        class TJson02
+        {
+            public Guid id { get; set; }
+            [JsonMap]
+            public DJson02 Json02 { get; set; }
+        }
+        public class DJson02
+        {
+            public string code { get; set; }
+            public string parentcode { get; set; }
+            public string name { get; set; }
+        }
+        class VersionBytes01
+        {
+            public Guid id { get; set; }
+            public string name { get; set; }
+            [Column(IsVersion = true)]
+            public byte[] version { get; set; }
+        }
+        public static void VersionBytes(IFreeSql fsql)
+        {
+
+            fsql.Aop.ConfigEntityProperty += (_, e) =>
+            {
+                if (fsql.Ado.DataType == DataType.SqlServer &&
+                    e.Property.Name == "version")
+                {
+                    e.ModifyResult.DbType = "timestamp";
+                    e.ModifyResult.CanInsert = false;
+                    e.ModifyResult.CanUpdate = false;
+                }
+            };
+
+            fsql.Delete<VersionBytes01>().Where("1=1").ExecuteAffrows();
+            var item = new VersionBytes01 { name = "name01" };
+            fsql.Insert(item).ExecuteAffrows();
+            var itemVersion = item.version;
+
+            item = fsql.Select<VersionBytes01>().Where(a => a.id == item.id).First();
+
+            item.name = "name02";
+            var sql = fsql.Update<VersionBytes01>().SetSource(item).ToSql();
+            if (1 != fsql.Update<VersionBytes01>().SetSource(item).ExecuteAffrows()) throw new Exception("不相同");
+
+            //item.name = "name03";
+            //if (1 != fsql.Update<VersionBytes01>().SetSource(item).ExecuteAffrows()) throw new Exception("不相同");
+
+            if (1 != fsql.Update<VersionBytes01>().Set(a => a.name, "name04").Where(a => a.id == item.id).ExecuteAffrows()) throw new Exception("不相同");
+        }
 
         static void Main(string[] args)
         {
+            var pams = new Dictionary<string, string>();
+            var sql2rscs = Utils.ReplaceSqlConstString("'', 'SARTEN ACERO VITR.18CM''''GRAFIT''''', 'a",
+                pams, "@lantin1");
+
+            //using (IFreeSql client = CreateInstance(@"Driver={Microsoft Access Driver (*.mdb)};DBQ=d:/accdb/2007.accdb", DataType.Odbc))
+            //{
+            //    client.Aop.AuditValue += (_, e) =>
+            //    {
+            //        if (e.Object is Dictionary<string, object> dict)
+            //        {
+            //            foreach(var key in dict.Keys)
+            //            {
+            //                var val = dict[key];
+            //                if (val == DBNull.Value) dict[key] = null;
+            //            }
+            //            e.ObjectAuditBreak = true;
+            //        }
+            //    };
+            //    Dictionary<string, object> data = new Dictionary<string, object>();
+            //    data.Add("ExpNo", "RSP0950008");
+            //    data.Add("SPoint", "RSP0950004");
+            //    data.Add("EPoint", "RSP095000440");
+            //    data.Add("PType", "RS");
+            //    data.Add("GType", "窨井轮廓线");
+            //    data.Add("LineStyle", 2);
+            //    data.Add("Memo", DBNull.Value);
+            //    data.Add("ClassID", DBNull.Value);
+            //    var kdkdksqlxx = client.InsertDict(data).AsTable("FZLINE").ToSql();
+            //}
+
+
             BaseModel<User1>.fsql = 1;
             BaseModel<UserGroup>.fsql = 2;
             Console.WriteLine(BaseModel<User1>.fsql);
@@ -359,19 +499,22 @@ namespace base_entity
             var fsql = new FreeSql.FreeSqlBuilder()
                 .UseAutoSyncStructure(true)
                 .UseNoneCommandParameter(true)
-               
+                .UseNameConvert(NameConvertType.ToLower)
+                .UseMappingPriority(MappingPriorityType.Attribute, MappingPriorityType.FluentApi, MappingPriorityType.Aop)
+
 
                 .UseConnectionString(FreeSql.DataType.Sqlite, "data source=:memory:")
+                //.UseConnectionString(DataType.Sqlite, "data source=db1.db;attachs=db2.db")
                 //.UseSlave("data source=test1.db", "data source=test2.db", "data source=test3.db", "data source=test4.db")
                 //.UseSlaveWeight(10, 1, 1, 5)
 
 
-                //.UseConnectionString(FreeSql.DataType.Firebird, @"database=localhost:D:\fbdata\EXAMPLES.fdb;user=sysdba;password=123456;max pool size=5")
-
+                .UseConnectionString(FreeSql.DataType.Firebird, @"database=localhost:D:\fbdata\EXAMPLES.fdb;user=sysdba;password=123456;max pool size=5")
+                //.UseQuoteSqlName(false)
 
                 //.UseConnectionString(FreeSql.DataType.MySql, "Data Source=127.0.0.1;Port=3306;User ID=root;Password=root;Initial Catalog=cccddd;Charset=utf8;SslMode=none;min pool size=1;Max pool size=2")
 
-                //.UseConnectionString(FreeSql.DataType.SqlServer, "Data Source=.;Integrated Security=True;Initial Catalog=freesqlTest;Pooling=true;Max Pool Size=3;TrustServerCertificate=true")
+                .UseConnectionString(FreeSql.DataType.SqlServer, "Data Source=.;Integrated Security=True;Initial Catalog=freesqlTest;Pooling=true;Max Pool Size=3;TrustServerCertificate=true")
 
                 //.UseConnectionString(FreeSql.DataType.PostgreSQL, "Host=192.168.164.10;Port=5432;Username=postgres;Password=123456;Database=tedb;Pooling=true;Maximum Pool Size=2")
                 //.UseConnectionString(FreeSql.DataType.PostgreSQL, "Host=192.168.164.10;Port=5432;Username=postgres;Password=123456;Database=toc;Pooling=true;Maximum Pool Size=2")
@@ -395,12 +538,322 @@ namespace base_entity
 
                 //.UseConnectionString(FreeSql.DataType.OdbcDameng, "Driver={DM8 ODBC DRIVER};Server=127.0.0.1:5236;Persist Security Info=False;Trusted_Connection=Yes;UID=USER1;PWD=123456789")
 
-                .UseMonitorCommand(null, (umcmd, log) => Console.WriteLine(umcmd.Connection.ConnectionString + ":" + umcmd.CommandText + "\r\n"))
+                .UseMonitorCommand(cmd =>
+                {
+                    Console.WriteLine(cmd.CommandText + "\r\n");
+                    //cmd.CommandText = null; //不执行
+                })
                 .UseLazyLoading(true)
                 //.UseGenerateCommandParameterWithLambda(true)
                 .Build();
             BaseEntity.Initialization(fsql, () => _asyncUow.Value);
             #endregion
+            fsql.UseJsonMap();
+
+            var items = new List<User1>();
+            for (var a = 0; a < 3; a++) items.Add(new User1 { Id = Guid.NewGuid(), Avatar = $"avatar{a}" });
+            var sqltest01 = fsql.Update<User1>()
+                .SetSource(items)
+                .UpdateColumns(a => a.Avatar)
+                .Set(a => a.Sort + 1).ToSql();
+
+            //VersionBytes(fsql);
+
+
+            fsql.Delete<TJson01>().Where(a => true).ExecuteAffrows();
+            fsql.Insert(new TJson01
+            {
+                Json02 = new DJson02 { code = "002", name = "name002", parentcode = "002_parent" },
+                Json03 = new DJson02 { code = "003", name = "name003", parentcode = "003_parent" },
+            }).NoneParameter(false).ExecuteAffrows();
+            var tjson01 = fsql.Select<TJson01>().First();
+
+            fsql.Delete<TJson02>().Where(a => true).ExecuteAffrows();
+            fsql.Insert(new TJson02
+            {
+                Json02 = new DJson02 { code = "0022", name = "name0022", parentcode = "0022_parent" },
+            }).NoneParameter(false).ExecuteAffrows();
+            var tjson02 = fsql.Select<TJson02>().First();
+
+
+            var sqlv01 = fsql.Select<BaseDataEntity>().AsType(typeof(GoodsData))
+                .ToSql(v => new GoodsDataDTO()
+                {
+                    Id = v.Id,
+                    GoodsNo = v.Code,
+                    GoodsName = v.Name,
+                });
+            // 解析会连带导出 CategoryId ，但是如果查询别名不是 a 时就会重置到基类表
+            // SELECT a.`CategoryId` as1, v.`Id` as2, v.`Code` as3, v.`Name` as4 
+            // FROM `FreeSqlTest`.`bdd_1` a, `BaseDataEntity` v
+
+            var groupsql01 = fsql.Select<User1>()
+                .GroupBy(a => new
+                {
+                    djjg = a.Id,
+                    qllx = a.Nickname,
+                    hjhs = a.GroupId
+                })
+                .ToSql(g => new
+                {
+                    g.Key.djjg,
+                    g.Key.qllx,
+                    xhjsl = g.Count(g.Key.djjg),
+                    hjzhs = g.Sum(g.Key.hjhs),
+                    blywsl = g.Count()
+                }, FieldAliasOptions.AsProperty);
+
+            using (var uow = fsql.CreateUnitOfWork())
+            {
+                uow.Orm.Select<User1>().ForUpdate().ToList();
+            }
+
+            var listaaaddd = new List<User1>();
+            for (int i = 0; i < 2; i++)
+            {
+                listaaaddd.Add(new User1 { Nickname = $"测试文本:{i}" });
+            }
+            fsql.Select<User1>();
+            fsql.Transaction(() =>
+            {
+
+                fsql.Insert(listaaaddd).ExecuteAffrows();  //加在事务里就出错
+            });
+
+            fsql.Select<IdentityTable>().Count();
+
+            var dkdksql = fsql.Select<User1>().WithLock().From<UserGroup>()
+                .InnerJoin<UserGroup>((user, usergroup) => user.GroupId == usergroup.Id && usergroup.GroupName == "xxx")
+                .ToSql();
+
+            //Func<string> getName1 = () => "xxx";
+            //fsql.GlobalFilter.Apply<User1>("fil1", a => a.Nickname == getName1());
+            //var gnsql2 = fsql.Select<User1>().ToSql();
+
+            using (var ctx9 = fsql.CreateDbContext())
+            {
+                //var uset = ctx9.Set<UserGroup>();
+                //var item = new UserGroup
+                //{
+                //    GroupName = "group1"
+                //};
+                //uset.Add(item);
+                //item.GroupName = "group1_2";
+                //uset.Update(item);
+                var uset = ctx9.Set<User1>();
+                var item = new User1
+                {
+                    Nickname = "nick1",
+                    Username = "user1"
+                };
+                uset.Add(item);
+                item.Nickname = "nick1_2";
+                item.Username = "user1_2";
+                uset.Update(item);
+
+                ctx9.SaveChanges();
+            }
+
+            var strs = new string[] { "a", "b", "c" };
+            var strssql1 = fsql.Select<User1>().Where(a => strs.Any(b => b == a.Nickname)).ToSql();
+            var strssql2 = fsql.Select<User1>().Where(a => strs.Any(b => a.Nickname.Contains(b))).ToSql();
+            var objs = new UserGroup[] { new UserGroup { GroupName = "a", Id = 1 }, new UserGroup { GroupName = "b", Id = 2 }, new UserGroup { GroupName = "c", Id = 3 } };
+            var objssql1 = fsql.Select<User1>().Where(a => objs.Any(b => b.GroupName == a.Nickname && b.Id == a.GroupId)).ToSql();
+
+
+            var tttsqlext01 = fsql.Select<User1>().ToSql(a => new
+            {
+                cou = SqlExt.Count(1).Over().PartitionBy(a.Id).ToValue(),
+                avg = SqlExt.Avg(1).Over().PartitionBy(a.Id).ToValue()
+
+            });
+
+
+
+            //fsql.CodeFirst.SyncStructure<SqliteAAA>();
+
+            fsql.CodeFirst.Entity<JoinTest01>(a => a.Property(p => p.code).IsRequired());
+            var repo1010 = fsql.GetRepository<JoinTest01>();
+            var jtitem = new JoinTest01 { id = 100 };
+            repo1010.Attach(jtitem);
+            jtitem.name = "name01";
+            repo1010.Update(jtitem);
+
+            var sqlt0a1 = fsql.InsertOrUpdate<抖店实时销售金额表>()
+                .SetSource(new 抖店实时销售金额表
+                {
+                    ID = 1,
+                    品牌名称 = "NIKE",
+                })
+                .ToSql();
+
+            fsql.UseMessagePackMap();
+
+            fsql.Delete<MessagePackMapInfo>().Where("1=1").ExecuteAffrows();
+            fsql.Insert(new MessagePackMapInfo { id = Guid.NewGuid(), Info = new MessagePackMap01 { name = "0023 中国国家1", address = "001address" } }).ExecuteAffrows();
+            var rem1 = fsql.Select<MessagePackMapInfo>().ToList();
+
+            var result1x = fsql.Ado.QuerySingle(() => new
+            {
+                DateTime.Now,
+                DateTime.UtcNow,
+                Math.PI
+            });
+
+            var usergroupRepository = fsql.GetAggregateRootRepository<UserGroup>();
+            usergroupRepository.Delete(a => true);
+            usergroupRepository.Insert(new[]{
+                new UserGroup
+                {
+                    CreateTime = DateTime.Now,
+                    GroupName = "group1",
+                    UpdateTime = DateTime.Now,
+                    Sort = 1,
+                    User1s = new List<User1>
+                    {
+                        new User1 { Nickname = "nickname11", Username = "username11", Description = "desc11" },
+                        new User1 { Nickname = "nickname12", Username = "username12", Description = "desc12" },
+                        new User1 { Nickname = "nickname13", Username = "username13", Description = "desc13" },
+                    }
+                },
+                new UserGroup
+                {
+                    CreateTime = DateTime.Now,
+                    GroupName = "group2",
+                    UpdateTime = DateTime.Now,
+                    Sort = 2,
+                    User1s = new List<User1>
+                    {
+                        new User1 { Nickname = "nickname21", Username = "username21", Description = "desc21" },
+                        new User1 { Nickname = "nickname22", Username = "username22", Description = "desc22" },
+                        new User1 { Nickname = "nickname23", Username = "username23", Description = "desc23" },
+                    }
+                },
+            });
+            var userRepository = fsql.GetAggregateRootRepository<User1>();
+
+            var testsublist1 = fsql.Select<UserGroup>()
+                .First(a => new
+                {
+                    a.Id,
+                    list = userRepository.Select.Where(b => b.GroupId == a.Id).ToList(),
+                    list2 = userRepository.Select.Where(b => b.GroupId == a.Id).ToList(b => b.Nickname),
+                });
+
+
+            Dictionary<string, object> dic = new Dictionary<string, object>();
+            dic.Add("id", 1);
+            dic.Add("name", "xxxx");
+            dic.Add("rowVersion", 100);
+            var diclist = new List<Dictionary<string, object>>();
+            diclist.Add(dic);
+            diclist.Add(new Dictionary<string, object>
+            {
+                ["id"] = 2,
+                ["name"] = "123,1234,123444",
+                ["rowVersion"] = 1
+            });
+
+            var sqss = fsql.InsertDict(dic).AsTable("table1").ToSql();
+            var sqss2 = fsql.InsertDict(diclist).AsTable("table1").ToSql();
+            sqss = fsql.InsertDict(dic).AsTable("table1").NoneParameter(false).ToSql();
+            sqss2 = fsql.InsertDict(diclist).AsTable("table1").NoneParameter(false).ToSql();
+
+            dic["xxx"] = null;
+            dic["yyy"] = 111;
+            var sqlupd1 = fsql.UpdateDict(dic).AsTable("table1").WherePrimary("id").ToSql();
+            var sqlupd2 = fsql.UpdateDict(diclist).AsTable("table1").WherePrimary("id").ToSql();
+            var sqlupd11 = fsql.UpdateDict(dic).AsTable("table1").WherePrimary("id").NoneParameter(false).ToSql();
+            var sqlupd22 = fsql.UpdateDict(diclist).AsTable("table1").WherePrimary("id").NoneParameter(false).ToSql();
+
+            var sqlupd111 = fsql.UpdateDict(dic).AsTable("table1").WherePrimary("id").IsVersion("rowVersion").NoneParameter(false).ToSql();
+            var sqlupd221 = fsql.UpdateDict(diclist).AsTable("table1").WherePrimary("id").IsVersion("rowVersion").NoneParameter(false).ToSql();
+            //fsql.UpdateDict(dic).AsTable("table1").WherePrimary("id").IsVersion("rowVersion").NoneParameter(false).ExecuteAffrows();
+            //fsql.UpdateDict(diclist).AsTable("table1").WherePrimary("id").IsVersion("rowVersion").NoneParameter(false).ExecuteAffrows();
+
+            var sqldel1 = fsql.DeleteDict(dic).AsTable("table1").ToSql();
+            var sqldel2 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
+            diclist[1]["title"] = "newtitle";
+            var sqldel3 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
+            diclist.Clear();
+            diclist.Add(new Dictionary<string, object>
+            {
+                ["id"] = 1
+            });
+            diclist.Add(new Dictionary<string, object>
+            {
+                ["id"] = 2
+            });
+            var sqldel4 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
+
+            fsql.Aop.ParseExpression += (_, e) =>
+            {
+                if (e.Expression is MemberExpression memExp == false) return;
+                ParameterExpression parmExp = null;
+                var exps = new List<MemberExpression>();
+                exps.Add(memExp);
+                while (memExp.Expression != null)
+                {
+                    if (memExp.Expression is MemberExpression parentExp)
+                    {
+                        exps.Add(parentExp);
+                        memExp = parentExp;
+                        if (fsql.CodeFirst.GetTableByEntity(memExp.Type) == null) return;
+                        continue;
+                    }
+                    if (memExp.Expression is ParameterExpression parmExp2)
+                    {
+                        parmExp = parmExp2;
+                        break;
+                    }
+                    return;
+                }
+                if (parmExp == null) return;
+                if (e.Tables == null) return;
+                var oldTables = e.Tables.ToArray();
+                var result = e.FreeParse(e.Expression);
+                for (var a = oldTables.Length; a < e.Tables.Count; a++)
+                {
+                    if (string.IsNullOrEmpty(e.Tables[a].NavigateCondition) == false) continue;
+                    var parentTableAlias = e.Tables[a].Alias?.Split(new[] { "__" }, StringSplitOptions.None);
+                    if (parentTableAlias == null || parentTableAlias.Length <= 1) continue;
+                    var parentTable = e.Tables.Where(c => c.Alias == string.Join("__", parentTableAlias.Take(parentTableAlias.Length - 1))).FirstOrDefault();
+                    if (parentTable == null || parentTable.Table.Properties.TryGetValue(parentTableAlias.Last(), out var navProp) == false) continue;
+                    var joinAttr = navProp.GetCustomAttribute<JoinConditionAttribute>();
+                    if (joinAttr == null) continue;
+                    e.Tables[a].NavigateCondition = joinAttr.Condition
+                        .Replace("a.", e.Tables[a].Alias + ".")
+                        .Replace("b.", parentTable.Alias + ".");
+                }
+            };
+            var joinsql1 = fsql.Select<JoinTest01>()
+                .Include(a => a.Parent.Parent)
+                .Where(a => a.Parent.Parent.code == "001")
+                .Where(a => a.JoinTest01Enum == JoinTest01Enum.f3.ToString())
+                .Where(a => object.Equals(a.JoinTest01Enum, JoinTest01Enum.f3))
+                .Where(a => new[] { JoinTest01Enum.f2, JoinTest01Enum.f3 }.Contains(a.JoinTest01Enum2))
+                .ToSql();
+
+
+            fsql.Aop.ConfigEntity += (_, e) =>
+            {
+                Console.WriteLine("Aop.ConfigEntity: " + e.ModifyResult.Name);
+                e.ModifyIndexResult.Add(new IndexAttribute("xxx2", "aa", true));
+            };
+            fsql.Aop.ConfigEntityProperty += (_, e) =>
+            {
+                Console.WriteLine("Aop.ConfigEntityProperty: " + e.ModifyResult.Name);
+            };
+            fsql.CodeFirst.ConfigEntity<AAA>(t =>
+            {
+                t.Name("AAA_fluentapi");
+                t.Property(a => a.aa).Name("AA_fluentapi");
+            });
+            fsql.Select<AAA>();
+
+            fsql.Select<AAA>();
+
+
 
             var sqlskdfj = fsql.Select<object>().AsType(typeof(BBB)).ToSql(a => new CCC());
 
@@ -434,7 +887,7 @@ namespace base_entity
                 .Where(a => a.Id == a1id1 || a.Id == a1id2)
                 .ToSql();
             var sql1a2 = fsql.Select<User1, UserGroup>()
-                .InnerJoin((a,b)=> a.GroupId == b.Id)
+                .InnerJoin((a, b) => a.GroupId == b.Id)
                 .Where((a, b) => a.Id == a1id1)
                 .WithTempQuery((a, b) => new { user = a, group = b }) //匿名类型
 
@@ -466,8 +919,8 @@ namespace base_entity
 
             fsql.CodeFirst.ConfigEntity<TestClass>(cf =>
             {
-	            cf.Property(p => p.Name).IsNullable(false);
-	            cf.Property(p => p.Tags).JsonMap();
+                cf.Property(p => p.Name).IsNullable(false);
+                cf.Property(p => p.Tags).JsonMap();
             });
 
             fsql.Insert(new TestClass("test 1")
@@ -672,7 +1125,7 @@ namespace base_entity
                 if (CommandTimeoutCascade._asyncLocalTimeout.Value > 0)
                     e.Command.CommandTimeout = CommandTimeoutCascade._asyncLocalTimeout.Value;
             };
-            
+
             using (new CommandTimeoutCascade(1000))
             {
                 fsql.Select<Order>().ToList();
@@ -681,48 +1134,13 @@ namespace base_entity
             }
 
 
-            Dictionary<string, object> dic = new Dictionary<string, object>();
-            dic.Add("id", 1);
-            dic.Add("name", "xxxx");
-            var diclist = new List<Dictionary<string, object>>();
-            diclist.Add(dic);
-            diclist.Add(new Dictionary<string, object>
-            {
-                ["id"] = 2,
-                ["name"] = "123,1234,123444"
-            });
-
-            var sqss = fsql.InsertDict(dic).AsTable("table1").ToSql();
-            var sqss2 = fsql.InsertDict(diclist).AsTable("table1").ToSql();
-            sqss = fsql.InsertDict(dic).AsTable("table1").NoneParameter(false).ToSql();
-            sqss2 = fsql.InsertDict(diclist).AsTable("table1").NoneParameter(false).ToSql();
-
-            var sqlupd1 = fsql.UpdateDict(dic).AsTable("table1").WherePrimary("id").ToSql();
-            var sqlupd2 = fsql.UpdateDict(diclist).AsTable("table1").WherePrimary("id").ToSql();
-            var sqlupd11 = fsql.UpdateDict(dic).AsTable("table1").WherePrimary("id").NoneParameter(false).ToSql();
-            var sqlupd22 = fsql.UpdateDict(diclist).AsTable("table1").WherePrimary("id").NoneParameter(false).ToSql();
-
-            var sqldel1 = fsql.DeleteDict(dic).AsTable("table1").ToSql();
-            var sqldel2 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
-            diclist[1]["title"] = "newtitle";
-            var sqldel3 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
-            diclist.Clear();
-            diclist.Add(new Dictionary<string, object>
-            {
-                ["id"] = 1
-            });
-            diclist.Add(new Dictionary<string, object>
-            {
-                ["id"] = 2
-            });
-            var sqldel4 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
-
             var sql1 = fsql.Select<User1, UserGroup>()
                 .RawJoin("FULL JOIN UserGroup b ON b.id = a.GroupId")
                 .Where((a, b) => a.IsDeleted == false)
                 .ToSql((a, b) => new
                 {
-                    user = a, group = b
+                    user = a,
+                    group = b
                 });
             sql1 = sql1.Replace("INNER JOIN ", "FULL JOIN ");
 
@@ -779,7 +1197,8 @@ namespace base_entity
                         groups11 = fsql.Select<UserGroup>().Where(c => c.Id == b.GroupId).ToList(),
                         groups22 = fsql.Select<UserGroup>().Where(c => c.Id == b.GroupId).ToList(c => new
                         {
-                            c.Id, c.GroupName,
+                            c.Id,
+                            c.GroupName,
                             username = b.Username,
                         })
                     }),
@@ -1049,10 +1468,10 @@ namespace base_entity
 
             fsql.Aop.AuditValue += new EventHandler<FreeSql.Aop.AuditValueEventArgs>((_, e) =>
             {
-                
+
             });
 
-            
+
 
 
             for (var a = 0; a < 10000; a++)
@@ -1205,7 +1624,7 @@ namespace base_entity
     },
   ]
 }
-"); 
+");
             var config = new JsonSerializerOptions()
             {
                 PropertyNamingPolicy = null,
@@ -1316,9 +1735,9 @@ namespace base_entity
             //fsql.Aop.ConfigEntityProperty += ConfigEntityProperty;
 
 
-            
 
-            
+
+
 
             Console.WriteLine("按任意键结束。。。");
             Console.ReadKey();
@@ -1446,4 +1865,64 @@ namespace base_entity
         }
     }
 
+    public class 抖店实时销售金额表
+    {
+        /// <summary>
+        /// ID
+        /// </summary>
+        [Column(Name = "ID", IsPrimary = true)]
+        public int ID { get; set; }
+
+        /// <summary>
+        /// 店铺名称
+        /// </summary>
+        [Column(Name = "店铺名称")]
+        public string 店铺名称 { get; set; }
+
+        /// <summary>
+        /// 日期
+        /// </summary>
+        [Column(Name = "日期")]
+        public DateTime 日期 { get; set; }
+
+        /// <summary>
+        /// 品牌名称
+        /// </summary>
+        [Column(Name = "品牌名称")]
+        public string 品牌名称 { get; set; }
+
+        /// <summary>
+        /// 成交金额
+        /// </summary>
+        [Column(Name = "成交金额")]
+        public decimal? 成交金额 { get; set; }
+
+        /// <summary>
+        /// 更新时间
+        /// </summary>
+        [Column(Name = "更新时间", CanInsert = false, CanUpdate = true, ServerTime = DateTimeKind.Local)]
+        public DateTime 更新时间 { get; set; }
+    }
+
+    abstract class BaseDataEntity
+    {
+        public Guid Id { get; set; }
+        public virtual int CategoryId { get; set; }
+        public virtual string Code { get; set; }
+        public virtual string Name { get; set; }
+    }
+    [Table(Name = "`FreeSqlTest`.`bdd_1`")]
+    class GoodsData : BaseDataEntity
+    {
+        public override Int32 CategoryId { get; set; }
+        public override string Code { get; set; }
+        public override string Name { get; set; }
+    }
+    class GoodsDataDTO
+    {
+        public Guid Id { get; set; }
+        public int CategoryId { get; set; }
+        public string GoodsNo { get; set; }
+        public string GoodsName { get; set; }
+    }
 }

@@ -189,13 +189,19 @@ namespace FreeSql.ClickHouse.Curd
                 return;
 
             if (_setIncr.Length > 0)
-                sb.Append(_set.Length > 0 ? _setIncr.ToString() : _setIncr.ToString().Substring(2));
+                sb.Append(_set.Length > 0 || _source.Any() ? _setIncr.ToString() : _setIncr.ToString().Substring(2));
 
             if (_source.Any() == false)
             {
+                var sbString = "";
                 foreach (var col in _table.Columns.Values)
                     if (col.Attribute.CanUpdate && string.IsNullOrEmpty(col.DbUpdateValue) == false)
-                        sb.Append(", ").Append(_commonUtils.QuoteSqlName(col.Attribute.Name)).Append(" = ").Append(col.DbUpdateValue);
+                    {
+                        if (sbString == "") sbString = sb.ToString();
+                        var loc3 = _commonUtils.QuoteSqlName(col.Attribute.Name);
+                        if (sbString.Contains(loc3)) continue;
+                        sb.Append(", ").Append(loc3).Append(" = ").Append(col.DbUpdateValue);
+                    }
             }
 
             if (_table.VersionColumn != null)

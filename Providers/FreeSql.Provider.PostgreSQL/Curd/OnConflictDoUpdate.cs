@@ -109,6 +109,7 @@ namespace FreeSql.PostgreSQL.Curd
             {
                 sb.Append(") DO UPDATE SET\r\n");
 
+                if (_pgsqlUpdate._tempPrimarys.Any() == false) _pgsqlUpdate._tempPrimarys = _tempPrimarys;
                 var sbSetEmpty = _pgsqlUpdate.InternalSbSet.Length == 0;
                 var sbSetIncrEmpty = _pgsqlUpdate.InternalSbSetIncr.Length == 0;
                 if (sbSetEmpty == false || sbSetIncrEmpty == false)
@@ -132,9 +133,16 @@ namespace FreeSql.PostgreSQL.Curd
                         }
                         else if (_pgsqlInsert.InternalIgnore.ContainsKey(col.Attribute.Name))
                         {
-                            var caseWhen = _pgsqlUpdate.InternalWhereCaseSource(col.CsName, sqlval => sqlval).Trim();
-                            sb.Append(caseWhen);
-                            if (caseWhen.EndsWith(" END")) _pgsqlUpdate.InternalToSqlCaseWhenEnd(sb, col);
+                            if (string.IsNullOrEmpty(col.DbUpdateValue) == false)
+                            {
+                                sb.Append(_pgsqlInsert.InternalCommonUtils.QuoteSqlName(col.Attribute.Name)).Append(" = ").Append(col.DbUpdateValue);
+                            }
+                            else
+                            {
+                                var caseWhen = _pgsqlUpdate.InternalWhereCaseSource(col.CsName, sqlval => sqlval).Trim();
+                                sb.Append(caseWhen);
+                                if (caseWhen.EndsWith(" END")) _pgsqlUpdate.InternalToSqlCaseWhenEnd(sb, col);
+                            }
                         }
                         else
                         {

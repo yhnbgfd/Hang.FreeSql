@@ -91,7 +91,7 @@ namespace FreeSql.Internal
                     else colattr.IsIgnore = true;
                     //Navigate 错误提示
                     var pnvAttr = common.GetEntityNavigateAttribute(trytb.Type, p);
-                    if (pnvAttr != null) throw new Exception(CoreStrings.Navigation_Missing_SetProperty(trytb.Type.DisplayCsharp(),p.Name));
+                    if (pnvAttr != null) throw new Exception(CoreStrings.Navigation_Missing_SetProperty(trytb.Type.DisplayCsharp(), p.Name));
                 }
                 if (tp == null && colattr?.IsIgnore != true)
                 {
@@ -327,7 +327,7 @@ namespace FreeSql.Internal
                     }
                 }
                 if (colattr.MapType == typeof(string) && colattr.IsVersion == true) colattr.StringLength = 40;
-                if (colattr.MapType == typeof(byte[]) && colattr.IsVersion == true) colattr.StringLength = 16;
+                if (colattr.MapType == typeof(byte[]) && colattr.IsVersion == true) colattr.StringLength = 16; // 8=sqlserver timestamp, 16=GuidToBytes
                 if (colattr.MapType == typeof(byte[]) && colattr.StringLength != 0)
                 {
                     int strlen = colattr.StringLength;
@@ -396,7 +396,7 @@ namespace FreeSql.Internal
             trytb.VersionColumn = trytb.Columns.Values.Where(a => a.Attribute.IsVersion == true).LastOrDefault();
             if (trytb.VersionColumn != null)
             {
-                if (trytb.VersionColumn.Attribute.MapType.IsNullableType() || 
+                if (trytb.VersionColumn.Attribute.MapType.IsNullableType() ||
                     trytb.VersionColumn.Attribute.MapType.IsNumberType() == false && !new[] { typeof(byte[]), typeof(string) }.Contains(trytb.VersionColumn.Attribute.MapType))
                     throw new Exception(CoreStrings.Properties_AsRowLock_Must_Numeric_Byte(trytb.VersionColumn.CsName));
             }
@@ -516,7 +516,9 @@ namespace FreeSql.Internal
             foreach (var col in trytb.Primarys)
             {
                 col.Attribute.IsNullable = false;
-                col.Attribute.DbType = col.Attribute.DbType.Replace("NOT NULL", "").Replace(" NULL", "").Trim() + " NOT NULL"; //sqlite 主键也可以插入 null
+                col.Attribute.DbType = col.Attribute.DbType.Replace("NOT NULL", "").Replace(" NULL", "").Trim();
+                if (common._orm.Ado.DataType == DataType.Sqlite)
+                    col.Attribute.DbType += " NOT NULL"; //sqlite 主键也可以插入 null
             }
             foreach (var col in trytb.Columns.Values)
             {
@@ -1061,7 +1063,7 @@ namespace FreeSql.Internal
                                 trytb.AddOrUpdateTableRef(pnv.Name, nvref);
                             }
                         }
-                        
+
                         if (nvref.Exception == null && trytb.Primarys.Length == 1 && isArrayToMany == false)
                         {
                             if (pnvBind?.Length == 1)
@@ -1431,14 +1433,25 @@ namespace FreeSql.Internal
             var type = obj.GetType();
             if (ttype.IsAssignableFrom(type)) return new[] { (T)obj };
             var ret = new List<T>();
-            var dic = obj as IDictionary;
-            if (dic != null)
+            if (obj is IDictionary<string, object> dic1)
             {
-                foreach (var key in dic.Keys)
+                foreach (var key in dic1.Keys)
+                {
+                    var dbkey = key.TrimStart('@', '?', ':');
+                    if (isCheckSql && string.IsNullOrEmpty(paramPrefix) == false && sql.IndexOf($"{paramPrefix}{dbkey}", StringComparison.CurrentCultureIgnoreCase) == -1) continue;
+                    var val = dic1[key];
+                    var valType = val == null ? typeof(string) : val.GetType();
+                    if (ttype.IsAssignableFrom(valType)) ret.Add((T)val);
+                    else ret.Add(constructorParamter(dbkey, valType, val));
+                }
+            }
+            else if (obj is IDictionary dic2)
+            {
+                foreach (var key in dic2.Keys)
                 {
                     var dbkey = key.ToString().TrimStart('@', '?', ':');
                     if (isCheckSql && string.IsNullOrEmpty(paramPrefix) == false && sql.IndexOf($"{paramPrefix}{dbkey}", StringComparison.CurrentCultureIgnoreCase) == -1) continue;
-                    var val = dic[key];
+                    var val = dic2[key];
                     var valType = val == null ? typeof(string) : val.GetType();
                     if (ttype.IsAssignableFrom(valType)) ret.Add((T)val);
                     else ret.Add(constructorParamter(dbkey, valType, val));
@@ -1543,6 +1556,13 @@ namespace FreeSql.Internal
                 case DataType.Dameng: //OdbcDameng 不会报错
                 case DataType.GBase:
                     if (dr.IsDBNull(index)) return null;
+                    break;
+                case DataType.MySql:
+                    if (dr.GetFieldType(index).FullName == "MySqlConnector.MySqlDateTime")
+                    {
+                        if (dr.IsDBNull(index)) return null;
+                        return dr.GetDateTime(index);
+                    }
                     break;
             }
             return dr.GetValue(index);
@@ -2014,6 +2034,7 @@ namespace FreeSql.Internal
 
         public static ConcurrentBag<Func<LabelTarget, Expression, Type, Expression>> GetDataReaderValueBlockExpressionSwitchTypeFullName = new ConcurrentBag<Func<LabelTarget, Expression, Type, Expression>>();
         public static ConcurrentBag<Func<LabelTarget, Expression, Expression, Type, Expression>> GetDataReaderValueBlockExpressionObjectToStringIfThenElse = new ConcurrentBag<Func<LabelTarget, Expression, Expression, Type, Expression>>();
+        public static ConcurrentBag<Func<LabelTarget, Expression, Expression, Type, Expression>> GetDataReaderValueBlockExpressionObjectToBytesIfThenElse = new ConcurrentBag<Func<LabelTarget, Expression, Expression, Type, Expression>>();
         public static Expression GetDataReaderValueBlockExpression(Type type, Expression value)
         {
             var returnTarget = Expression.Label(typeof(object));
@@ -2025,6 +2046,9 @@ namespace FreeSql.Internal
                     switch (type.FullName)
                     {
                         case "System.Byte[]":
+                            Expression callToBytesExp = Expression.Return(returnTarget, Expression.Call(Expression.Constant(DefaultEncoding), MethodEncodingGetBytes, Expression.Call(MethodToString, valueExp)));
+                            foreach (var toBytesFunc in GetDataReaderValueBlockExpressionObjectToBytesIfThenElse)
+                                callToBytesExp = toBytesFunc(returnTarget, valueExp, callToBytesExp, type);
                             return Expression.IfThenElse(
                                 Expression.TypeEqual(valueExp, type),
                                 Expression.Return(returnTarget, valueExp),
@@ -2034,7 +2058,7 @@ namespace FreeSql.Internal
                                     Expression.IfThenElse(
                                         Expression.OrElse(Expression.TypeEqual(valueExp, typeof(Guid)), Expression.TypeEqual(valueExp, typeof(Guid?))),
                                         Expression.Return(returnTarget, Expression.Call(MethodGuidToBytes, Expression.Convert(valueExp, typeof(Guid)))),
-                                        Expression.Return(returnTarget, Expression.Call(Expression.Constant(DefaultEncoding), MethodEncodingGetBytes, Expression.Call(MethodToString, valueExp)))
+                                        callToBytesExp
                                     )
                                 )
                             );
@@ -2454,14 +2478,15 @@ namespace FreeSql.Internal
                     }
                     if (sidx < sql.Length && sql[sidx] == '\'')
                     {
+                        sidx++;
                         startLength += 2;
                         continue;
                     }
                     break;
                 }
-                if (startLength > 0)
+                if (startLength >= 0)
                 {
-                    var pvalue = sql.Substring(startIdx, startLength).Replace("''", "'");
+                    var pvalue = startLength == 0 ? "" : sql.Substring(startIdx, startLength).Replace("''", "'");
                     var pname = parms.Where(a => a.Value == pvalue).Select(a => a.Key).FirstOrDefault();
                     if (string.IsNullOrEmpty(pname))
                     {

@@ -44,9 +44,7 @@ QQ群：4336577(已满)、8578575(已满)、52508226(在线)
 
 - [zhontai.net Admin 后台管理系统](https://github.com/zhontai/Admin.Core)
 - [A simple and practical CMS implemented by .NET Core](https://github.com/luoyunchong/lin-cms-dotnetcore)
-- [iusaas.com SaaS 企业应用管理系统](https://github.com/alonsoalon/TenantSite.Server)
 - [EasyCms 企业建站，事业单位使用的CMS管理系统](https://github.com/jasonyush/EasyCMS)
-- [内容管理系统](https://github.com/hejiyong/fscms)
 
 <p align="center">
   <img src="https://github.com/dotnetcore/FreeSql/raw/master/functions13.png"/>
@@ -211,14 +209,17 @@ Elapsed: 00:00:00.6495301; Query Entity Counts: 131072; ORM: Dapper
 constantine, 
 [JohnZhou2020](https://github.com/JohnZhou2020), 
 [mafeng8](https://github.com/mafeng8), 
-[VicBilibily](https://github.com/VicBilibily) 等。
-
+[VicBilibily](https://github.com/VicBilibily), 
+[Soar](https://github.com/sgf),
+[quzhen91](https://github.com/quzhen91),
+homejun,
+[d4ilys](https://github.com/d4ilys) 等。
 
 ## 💕 Donation (捐赠)
 
 L\*y 58元、花花 88元、麦兜很乖 50元、网络来者 2000元、John 99.99元、alex 666元、bacongao 36元、无名 100元、Eternity 188元、无名 10元、⌒.Helper~..oO 66元、习惯与被习惯 100元、无名 100元、蔡易喋 88.88元、中讯科技 1000元、Good Good Work 24元、炽焰 6.6元、Nothing 100元、兰州天擎赵 500元、哈利路亚 300元、
 无名 100元、蛰伏 99.99元、TCYM 66.66元、MOTA 5元、LDZXG 30元、Near 30元、建爽 66元、无名 200元、LambertWu 100元、无名 18.88元、乌龙 50元、无名 100元、陳怼怼 66.66元、陳怼怼 66.66元、丁淮 100元、李伟坚-Excel催化剂 100元、白狐 6.66元、她微笑的脸y 30元、Eternity²º²¹ 588元、夜归柴门 88元、蔡易喋 666.66元、
-*礼 10元、litrpa 88元、Alax CHOW 200元、Daily 66元、k*t 66元、蓝 100元、\*菜 10元、生命如歌 1000元、山鸡 88元、平凡 100元、大树 1000元、软软的毛毛虫 66.66
+*礼 10元、litrpa 88元、Alax CHOW 200元、Daily 66元、k*t 66元、蓝 100元、\*菜 10元、生命如歌 1000元、山鸡 88元、平凡 100元、大树 1000元、软软的毛毛虫 66.66元、问卷星 2000元、与你无关 5000元
 
 > 超级感谢你的打赏。
 

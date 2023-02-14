@@ -37,8 +37,9 @@ namespace FreeSql.Odbc.Default
                 return ret;
             });
 
-        public override string FormatSql(string sql, params object[] args) => sql?.FormatOdbc(args);
-        public override string QuoteSqlName(params string[] name)
+        static FreeSql.Odbc.Default.OdbcAdo _customAdo = new FreeSql.Odbc.Default.OdbcAdo();
+        public override string FormatSql(string sql, params object[] args) => (_orm?.Ado as OdbcAdo)?.Addslashes(sql, args) ?? _customAdo.Addslashes(sql, args);
+        public override string QuoteSqlNameAdapter(params string[] name)
         {
             if (name.Length == 1)
             {

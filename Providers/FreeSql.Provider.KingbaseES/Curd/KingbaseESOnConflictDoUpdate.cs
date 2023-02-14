@@ -109,6 +109,7 @@ namespace FreeSql.KingbaseES
             {
                 sb.Append(") DO UPDATE SET\r\n");
 
+                if (_update._tempPrimarys.Any() == false) _update._tempPrimarys = _tempPrimarys;
                 var sbSetEmpty = _update.InternalSbSet.Length == 0;
                 var sbSetIncrEmpty = _update.InternalSbSetIncr.Length == 0;
                 if (sbSetEmpty == false || sbSetIncrEmpty == false)
@@ -132,9 +133,16 @@ namespace FreeSql.KingbaseES
                         }
                         else if (_insert.InternalIgnore.ContainsKey(col.Attribute.Name))
                         {
-                            var caseWhen = _update.InternalWhereCaseSource(col.CsName, sqlval => sqlval).Trim();
-                            sb.Append(caseWhen);
-                            if (caseWhen.EndsWith(" END")) _update.InternalToSqlCaseWhenEnd(sb, col);
+                            if (string.IsNullOrEmpty(col.DbUpdateValue) == false)
+                            {
+                                sb.Append(_insert.InternalCommonUtils.QuoteSqlName(col.Attribute.Name)).Append(" = ").Append(col.DbUpdateValue);
+                            }
+                            else
+                            {
+                                var caseWhen = _update.InternalWhereCaseSource(col.CsName, sqlval => sqlval).Trim();
+                                sb.Append(caseWhen);
+                                if (caseWhen.EndsWith(" END")) _update.InternalToSqlCaseWhenEnd(sb, col);
+                            }
                         }
                         else
                         {

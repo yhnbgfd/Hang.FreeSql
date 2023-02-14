@@ -9,6 +9,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading;
 using FreeSql.Internal.CommonProvider;
+using System.Data;
 
 namespace FreeSql
 {
@@ -29,12 +30,14 @@ namespace FreeSql
     public abstract partial class DbSet<TEntity> : IDbSet where TEntity : class
     {
         internal DbContext _db { get; set; }
-        internal IUnitOfWork _uow { get; set; }
+        internal virtual IUnitOfWork _uow { get; set; }
 
         protected virtual ISelect<TEntity> OrmSelect(object dywhere)
         {
             DbContextFlushCommand(); //查询前先提交，否则会出脏读
-            var select = _db.OrmOriginal.Select<TEntity>().AsType(_entityType).WithTransaction(_uow?.GetOrBeginTransaction(false)).TrackToList(TrackToList).WhereDynamic(dywhere);
+            var uowIsolationLevel = _uow?.IsolationLevel ?? IsolationLevel.Unspecified;
+            var select = _db.OrmOriginal.Select<TEntity>().AsType(_entityType).WithTransaction(_uow?.GetOrBeginTransaction(uowIsolationLevel != IsolationLevel.Unspecified)).TrackToList(TrackToList).WhereDynamic(dywhere);
+            (select as Select0Provider)._resolveHookTransaction = () => _uow?.GetOrBeginTransaction();
             if (_db.Options.EnableGlobalFilter == false) select.DisableGlobalFilter();
             return select;
         }
@@ -163,7 +166,7 @@ namespace FreeSql
             return this;
         }
 
-        Dictionary<Type, DbSet<object>> _dicDbSetObjects = new Dictionary<Type, DbSet<object>>();
+        internal Dictionary<Type, DbSet<object>> _dicDbSetObjects = new Dictionary<Type, DbSet<object>>();
         DbSet<object> GetDbSetObject(Type et)
         {
             if (_dicDbSetObjects.TryGetValue(et, out var tryds)) return tryds;
