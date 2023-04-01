@@ -1,12 +1,16 @@
-﻿using FreeSql;
+﻿using Densen.Models.ids;
+using FreeSql;
 using FreeSql.DataAnnotations;
 using FreeSql.Extensions;
 using FreeSql.Internal;
 using FreeSql.Internal.CommonProvider;
 using FreeSql.Internal.Model;
 using FreeSql.Odbc.Default;
+using Microsoft.Data.SqlClient;
+using NetTopologySuite.Geometries;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Npgsql;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -108,7 +112,7 @@ namespace base_entity
             public B B { get; set; }
         }
 
-        [Table(Name = "as_table_log_{yyyyMM}", AsTable = "createtime=2022-1-1(1 month)")]
+        [Table(Name = "as_table_log_{yyyyMMddHH}", AsTable = "createtime=2022-1-1 11(1 month)")]
         class AsTableLog
         {
             public Guid id { get; set; }
@@ -361,11 +365,6 @@ namespace base_entity
             public int aa { get; set; }
         }
 
-        public class JoinConditionAttribute : Attribute
-        {
-            public string Condition { get; set; }
-            public JoinConditionAttribute(string condition) => Condition = condition;
-        }
         public class JoinTest01
         {
             public int id { get; set; }
@@ -377,8 +376,10 @@ namespace base_entity
             [Column(MapType = typeof(int))]
             public JoinTest01Enum JoinTest01Enum2 { get; set; }
 
-            [JoinCondition("a.parentcode = b.code")]
+            [Navigate(nameof(parentcode), TempPrimary = nameof(JoinTest01.code))]
             public JoinTest01 Parent { get; set; }
+            [Navigate(nameof(JoinTest01.parentcode), TempPrimary = nameof(code))]
+            public List<JoinTest01> Childs { get; set; }
         }
         public enum JoinTest01Enum { f1, f2, f3 }
 
@@ -425,6 +426,16 @@ namespace base_entity
             [Column(IsVersion = true)]
             public byte[] version { get; set; }
         }
+        public class Xpb
+        {
+            [Column(Name = "ID", IsPrimary = true)]
+            public string Id { get; set; }
+            [Column(Name = "XP", StringLength = -1)]
+            public byte[] Bytes { get; set; }
+            [Column(Name = "UPLOAD_TIME")]
+            public DateTime UploadTime { get; set; }
+
+        }
         public static void VersionBytes(IFreeSql fsql)
         {
 
@@ -454,6 +465,22 @@ namespace base_entity
             //if (1 != fsql.Update<VersionBytes01>().SetSource(item).ExecuteAffrows()) throw new Exception("不相同");
 
             if (1 != fsql.Update<VersionBytes01>().Set(a => a.name, "name04").Where(a => a.id == item.id).ExecuteAffrows()) throw new Exception("不相同");
+        }
+        public class City
+        {
+            public int Id { get; set; }
+            public string Name { get; set; }
+            public Point Center { get; set; }
+        }
+        public abstract class BaseEntity2
+        {
+            [Column(IsPrimary = true, IsIdentity = true)]
+            public long Id { get; set; }
+        }
+
+        public class Student : BaseEntity2
+        {
+            public string Name { get; set; }
         }
 
         static void Main(string[] args)
@@ -500,10 +527,11 @@ namespace base_entity
                 .UseAutoSyncStructure(true)
                 .UseNoneCommandParameter(true)
                 .UseNameConvert(NameConvertType.ToLower)
-                .UseMappingPriority(MappingPriorityType.Attribute, MappingPriorityType.FluentApi, MappingPriorityType.Aop)
+                //.UseMappingPriority(MappingPriorityType.Attribute, MappingPriorityType.FluentApi, MappingPriorityType.Aop)
 
 
                 .UseConnectionString(FreeSql.DataType.Sqlite, "data source=:memory:")
+                .UseConnectionString(DataType.Sqlite, "data source=C:\\Users\\28810\\Desktop\\github\\FreeSql\\Examples\\base_entity\\AspNetRoleClaims\\ids_api.db")
                 //.UseConnectionString(DataType.Sqlite, "data source=db1.db;attachs=db2.db")
                 //.UseSlave("data source=test1.db", "data source=test2.db", "data source=test3.db", "data source=test4.db")
                 //.UseSlaveWeight(10, 1, 1, 5)
@@ -512,7 +540,7 @@ namespace base_entity
                 .UseConnectionString(FreeSql.DataType.Firebird, @"database=localhost:D:\fbdata\EXAMPLES.fdb;user=sysdba;password=123456;max pool size=5")
                 //.UseQuoteSqlName(false)
 
-                //.UseConnectionString(FreeSql.DataType.MySql, "Data Source=127.0.0.1;Port=3306;User ID=root;Password=root;Initial Catalog=cccddd;Charset=utf8;SslMode=none;min pool size=1;Max pool size=2")
+                .UseConnectionString(FreeSql.DataType.MySql, "Data Source=127.0.0.1;Port=3306;User ID=root;Password=root;Initial Catalog=cccddd;Charset=utf8;SslMode=none;min pool size=1;Max pool size=2;AllowLoadLocalInfile=true")
 
                 .UseConnectionString(FreeSql.DataType.SqlServer, "Data Source=.;Integrated Security=True;Initial Catalog=freesqlTest;Pooling=true;Max Pool Size=3;TrustServerCertificate=true")
 
@@ -544,11 +572,352 @@ namespace base_entity
                     //cmd.CommandText = null; //不执行
                 })
                 .UseLazyLoading(true)
-                //.UseGenerateCommandParameterWithLambda(true)
+                .UseGenerateCommandParameterWithLambda(true)
                 .Build();
             BaseEntity.Initialization(fsql, () => _asyncUow.Value);
             #endregion
-            fsql.UseJsonMap();
+
+            var bulkUsers = new[] {
+                new IdentityUser1 { Nickname = "nickname11", Username = "username11" },
+                new IdentityUser1 { Nickname = "nickname12", Username = "username12" },
+                new IdentityUser1 { Nickname = "nickname13", Username = "username13" },
+
+                new IdentityUser1 { Nickname = "nickname21", Username = "username21" },
+                new IdentityUser1 { Nickname = "nickname22", Username = "username22" },
+                new IdentityUser1 { Nickname = "nickname23", Username = "username23" }
+            };
+            fsql.Insert(bulkUsers).NoneParameter().ExecuteAffrows();
+            fsql.Insert(bulkUsers).IgnoreInsertValueSql(a => a.Nickname).NoneParameter().ExecuteAffrows();
+            bulkUsers = fsql.Select<IdentityUser1>().OrderByDescending(a => a.Id).Limit(3).ToList().ToArray();
+            bulkUsers[0].Nickname += "_bulkupdate";
+            bulkUsers[1].Nickname += "_bulkupdate";
+            bulkUsers[2].Nickname += "_bulkupdate";
+            fsql.Update<IdentityUser1>().SetSource(bulkUsers).ExecuteSqlBulkCopy();
+
+
+            var objtsql1 = fsql.Select<object>().WithSql("select * from user1").ToList();
+            var objtsql2 = fsql.Select<object>().WithSql("select * from user1").ToList<User1>();
+
+            var astsql = fsql.Select<AsTableLog, Sys_owner>()
+                .InnerJoin((a, b) => a.id == b.Id)
+                .OrderBy((a,b) => a.createtime)
+                .ToSql();
+
+
+            //var table = fsql.CodeFirst.GetTableByEntity(typeof(AsTableLog));
+            //table.SetAsTable(new ModAsTableImpl(fsql), table.ColumnsByCs[nameof(AsTableLog.click)]);
+
+
+            var testitems = new[]
+            {
+                new AsTableLog{ msg = "msg01", createtime = DateTime.Parse("2022-1-1 13:00:11"), click = 1 },
+                new AsTableLog{ msg = "msg02", createtime = DateTime.Parse("2022-1-2 14:00:12"), click = 2 },
+                new AsTableLog{ msg = "msg03", createtime = DateTime.Parse("2022-2-2 15:00:13"), click = 3 },
+                new AsTableLog{ msg = "msg04", createtime = DateTime.Parse("2022-2-8 15:00:13"), click = 4 },
+                new AsTableLog{ msg = "msg05", createtime = DateTime.Parse("2022-3-8 15:00:13"), click = 5 },
+                new AsTableLog{ msg = "msg06", createtime = DateTime.Parse("2022-4-8 15:00:13"), click = 6 },
+                new AsTableLog{ msg = "msg07", createtime = DateTime.Parse("2022-6-8 15:00:13"), click = 7 },
+                new AsTableLog{ msg = "msg08", createtime = DateTime.Parse("2022-7-1"), click = 9},
+                new AsTableLog{ msg = "msg09", createtime = DateTime.Parse("2022-7-1 11:00:00"), click = 10},
+                new AsTableLog{ msg = "msg10", createtime = DateTime.Parse("2022-7-1 12:00:00"), click = 10}
+            };
+            var sqlatb = fsql.Insert(testitems).NoneParameter();
+            var sqlat = sqlatb.ToSql();
+            var sqlatr = sqlatb.ExecuteAffrows();
+
+            var sqlatc1 = fsql.Delete<AsTableLog>().Where(a => a.id == Guid.NewGuid() && a.createtime == DateTime.Parse("2022-3-8 15:00:13"));
+            var sqlatca1 = sqlatc1.ToSql();
+            var sqlatcr1 = sqlatc1.ExecuteAffrows();
+
+            var sqlatc2 = fsql.Delete<AsTableLog>().Where(a => a.id == Guid.NewGuid() && a.createtime == DateTime.Parse("2021-3-8 15:00:13"));
+            var sqlatca2 = sqlatc2.ToSql();
+            var sqlatcr2 = sqlatc2.ExecuteAffrows();
+
+            var sqlatc = fsql.Delete<AsTableLog>().Where(a => a.id == Guid.NewGuid() && a.createtime.Between(DateTime.Parse("2022-3-1"), DateTime.Parse("2022-5-1")));
+            var sqlatca = sqlatc.ToSql();
+            var sqlatcr = sqlatc.ExecuteAffrows();
+
+            var sqlatd1 = fsql.Update<AsTableLog>().SetSource(testitems[0]);
+            var sqlatd101 = sqlatd1.ToSql();
+            var sqlatd102 = sqlatd1.ExecuteAffrows();
+
+            var sqlatd2 = fsql.Update<AsTableLog>().SetSource(testitems[5]);
+            var sqlatd201 = sqlatd2.ToSql();
+            var sqlatd202 = sqlatd2.ExecuteAffrows();
+
+            var sqlatd3 = fsql.Update<AsTableLog>().SetSource(testitems);
+            var sqlatd301 = sqlatd3.ToSql();
+            var sqlatd302 = sqlatd3.ExecuteAffrows();
+
+            var sqlatd4 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg");
+            var sqlatd401 = sqlatd4.ToSql();
+            var sqlatd402 = sqlatd4.ExecuteAffrows();
+
+            var sqlatd5 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime.Between(DateTime.Parse("2022-3-1"), DateTime.Parse("2022-5-1")));
+            var sqlatd501 = sqlatd5.ToSql();
+            var sqlatd502 = sqlatd5.ExecuteAffrows();
+
+            var sqlatd6 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime > DateTime.Parse("2022-3-1") && a.createtime < DateTime.Parse("2022-5-1"));
+            var sqlatd601 = sqlatd6.ToSql();
+            var sqlatd602 = sqlatd6.ExecuteAffrows();
+
+            var sqlatd7 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime > DateTime.Parse("2022-3-1"));
+            var sqlatd701 = sqlatd7.ToSql();
+            var sqlatd702 = sqlatd7.ExecuteAffrows();
+
+            var sqlatd8 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime < DateTime.Parse("2022-5-1"));
+            var sqlatd801 = sqlatd8.ToSql();
+            var sqlatd802 = sqlatd8.ExecuteAffrows();
+
+            var sqlatd12 = fsql.InsertOrUpdate<AsTableLog>().SetSource(testitems[0]);
+            var sqlatd1201 = sqlatd12.ToSql();
+            var sqlatd1202 = sqlatd12.ExecuteAffrows();
+
+            var sqlatd22 = fsql.InsertOrUpdate<AsTableLog>().SetSource(testitems[5]);
+            var sqlatd2201 = sqlatd22.ToSql();
+            var sqlatd2202 = sqlatd22.ExecuteAffrows();
+
+            var sqlatd32 = fsql.InsertOrUpdate<AsTableLog>().SetSource(testitems);
+            var sqlatd3201 = sqlatd32.ToSql();
+            var sqlatd3202 = sqlatd32.ExecuteAffrows();
+
+            var sqls1 = fsql.Select<AsTableLog>().OrderBy(a => a.createtime);
+            var sqls101 = sqls1.ToSql();
+            var sqls102 = sqls1.ToList();
+
+            var sqls2 = fsql.Select<AsTableLog>().Where(a => a.createtime.Between(DateTime.Parse("2022-3-1"), DateTime.Parse("2022-5-1")));
+            var sqls201 = sqls2.ToSql();
+            var sqls202 = sqls2.ToList();
+
+            var sqls3 = fsql.Select<AsTableLog>().Where(a => a.createtime > DateTime.Parse("2022-3-1") && a.createtime < DateTime.Parse("2022-5-1"));
+            var sqls301 = sqls3.ToSql();
+            var sqls302 = sqls3.ToList();
+
+            var sqls4 = fsql.Select<AsTableLog>().Where(a => a.createtime > DateTime.Parse("2022-3-1"));
+            var sqls401 = sqls4.ToSql();
+            var sqls402 = sqls4.ToList();
+
+            var sqls5 = fsql.Select<AsTableLog>().Where(a => a.createtime < DateTime.Parse("2022-5-1"));
+            var sqls501 = sqls5.ToSql();
+            var sqls502 = sqls5.ToList();
+
+            var sqls6 = fsql.Select<AsTableLog>().Where(a => a.createtime < DateTime.Parse("2022-5-1")).Limit(10).OrderBy(a => a.createtime);
+            var sqls601 = sqls6.ToSql();
+            var sqls602 = sqls6.ToList();
+
+            var sqls7 = fsql.Select<AsTableLog>().Where(a => a.createtime < DateTime.Parse("2022-5-1")).ToAggregate(g => new
+            {
+                sum1 = g.Sum(g.Key.click),
+                cou1 = g.Count(),
+                avg1 = g.Avg(g.Key.click),
+                min = g.Min(g.Key.click),
+                max = g.Max(g.Key.click)
+            });
+
+
+            var usergroupRepository = fsql.GetAggregateRootRepository<UserGroup>();
+            usergroupRepository.Delete(a => true);
+            usergroupRepository.Insert(new[]{
+                new UserGroup
+                {
+                    CreateTime = DateTime.Now,
+                    GroupName = "group1",
+                    UpdateTime = DateTime.Now,
+                    Sort = 1,
+                    User1s = new List<User1>
+                    {
+                        new User1 { Nickname = "nickname11", Username = "username11", Description = "desc11" },
+                        new User1 { Nickname = "nickname12", Username = "username12", Description = "desc12" },
+                        new User1 { Nickname = "nickname13", Username = "username13", Description = "desc13" },
+                    }
+                },
+                new UserGroup
+                {
+                    CreateTime = DateTime.Now,
+                    GroupName = "group2",
+                    UpdateTime = DateTime.Now,
+                    Sort = 2,
+                    User1s = new List<User1>
+                    {
+                        new User1 { Nickname = "nickname21", Username = "username21", Description = "desc21" },
+                        new User1 { Nickname = "nickname22", Username = "username22", Description = "desc22" },
+                        new User1 { Nickname = "nickname23", Username = "username23", Description = "desc23" },
+                    }
+                },
+            });
+            var ugroupFirst = usergroupRepository.Select.First();
+            ugroupFirst.Sort++;
+            usergroupRepository.Update(ugroupFirst);
+            var userRepository = fsql.GetAggregateRootRepository<User1>();
+
+            var testsublist1 = fsql.Select<UserGroup>()
+                .First(a => new
+                {
+                    a.Id,
+                    list = userRepository.Select.Where(b => b.GroupId == a.Id).ToList(),
+                    list2 = userRepository.Select.Where(b => b.GroupId == a.Id).ToList(b => b.Nickname),
+                });
+
+            //fsql.CodeFirst.GetTableByEntity(typeof(User1)).Columns.Values.ToList().ForEach(col =>
+            //{
+            //    col.Comment = "";
+            //});
+            fsql.Insert(Enumerable.Range(0, 100).Select(a => new User1 { Id = Guid.NewGuid(), Nickname = $"nickname{a}", Username = $"username{a}", Description = $"desc{a}" }).ToArray()).ExecuteAffrows();
+
+            fsql.InsertOrUpdate<User1>()
+                .SetSource(fsql.Select<User1>().ToList())
+                .ExecuteMySqlBulkCopy();
+
+            var updatejoin01 = fsql.Update<User1>()
+                .Join(fsql.Select<UserGroup>(), (a, b) => a.GroupId == b.Id)
+                .Set((a, b) => a.Nickname == b.GroupName)
+                .ExecuteAffrows();
+            var updatejoin02 = fsql.Update<User1>()
+                .Join<UserGroup>((a, b) => a.GroupId == b.Id)
+                .Set((a, b) => a.Nickname == b.GroupName)
+                .ExecuteAffrows();
+            var updatejoin03 = fsql.Update<User1>()
+                .Join<UserGroup>((a, b) => a.GroupId == b.Id)
+                .Set((a, b) => a.Nickname == "b.groupname")
+                .ExecuteAffrows();
+
+            var sql1c2 = fsql.Select<User1>()
+                .GroupBy(a => new { a.Nickname, a.Avatar })
+                .WithTempQuery(b => new
+                {
+                    sum = b.Sum(b.Value.Sort),
+                    b.Key.Nickname,
+                    b.Key.Avatar,
+                })
+                .OrderByDescending(arg => arg.sum)
+                .ToSql(arg => new
+                {
+                    str1 = string.Concat(arg.Nickname, '-', arg.Avatar, '-'),
+                    str2 = string.Concat(arg.Nickname, '-', arg.Avatar)
+                });   //报错 多括号
+                //.ToOne(arg => string.Concat(arg.Nickname, '-', arg.Avatar)); //正常
+            Console.WriteLine(sql1c2);
+
+            var xp = new Xpb()
+            {
+                Id = "L23035555",
+                UploadTime = DateTime.Now,
+                Bytes = Convert.FromBase64String("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FFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAf/9k=")
+            };
+            fsql.InsertOrUpdate<Xpb>().SetSource(xp).ExecuteAffrows();
+
+            var xpsql01 = fsql.InsertOrUpdateDict(new Dictionary<string, object>
+            {
+                [""] = "Xpb",
+                ["ID"] = "L230355551",
+                ["UPLOAD_TIME"] = DateTime.Now,
+                ["XP"] = Convert.FromBase64String("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FFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAf/9k=")
+            }).WherePrimary("Id").ExecuteAffrows();
+
+        fsql.UseJsonMap();
+
+            fsql.Select<User1>().IncludeMany(a => a.Roles);
+
+            var displayNameTb = fsql.CodeFirst.GetTableByEntity(typeof(DeviceCodes));
+
+            var joinsql1 = fsql.Select<JoinTest01>()
+                .Include(a => a.Parent.Parent)
+                .Where(a => a.Parent.Parent.code == "001")
+                .Where(a => a.JoinTest01Enum == JoinTest01Enum.f3.ToString())
+                .Where(a => object.Equals(a.JoinTest01Enum, JoinTest01Enum.f3))
+                .Where(a => new[] { JoinTest01Enum.f2, JoinTest01Enum.f3 }.Contains(a.JoinTest01Enum2))
+                .ToSql();
+
+            var atimpl = fsql.CodeFirst.GetTableByEntity(typeof(AsTableLog))
+                .AsTableImpl;
+
+            atimpl.GetTableNameByColumnValue(DateTime.Parse("2023-7-1"), autoExpand: true);
+
+            //var dywhere = new DynamicFilterInfo { Field = "AspNetRoless.Name", Operator = DynamicFilterOperator.Equal, Value = "Admin" };
+            //var method = typeof(ISelect<object>).GetMethod("WhereDynamicFilter");
+            //var users4 = fsql.Select<AspNetUsers>().IncludeByPropertyName("AspNetUserRoless", then => then.WhereDynamicFilter(dywhere)).ToList();
+
+
+            var type = typeof(Student);
+
+            var sw111 = fsql.Queryable<object>()
+                .AsType(type)
+                .Where(s => (s as BaseEntity2).Id == 1)
+                .ToSql();
+
+            Console.WriteLine(sw111);
+
+            var testsql01 = fsql.Select<User1>()
+                //.GroupBy(a => new { a.Avatar, a.GroupId })
+                //.Having(g => g.Sum(g.Value.Sort) > 0)
+                .WithTempQuery(a => new
+                {
+                    a.Avatar, a.GroupId, sum1 = SqlExt.Sum(a.Sort).ToValue()
+                })
+                .Where(a => a.sum1 > 0)
+                .ToSql();
+
+
+            fsql.Aop.ParseExpression += (_, e) =>
+            {
+                if (fsql.Ado.DataType == DataType.PostgreSQL)
+                {
+                    if (e.Expression is MethodCallExpression callExp &&
+                        callExp.Object is not null && typeof(Geometry).IsAssignableFrom(callExp.Method.DeclaringType))
+                    {
+                        var instance = callExp.Object;
+                        var arguments = callExp.Arguments;
+                        var Function = new Func<string, Expression[], Type, string>((dbfunc, args, returnType) =>
+                        {
+                            return $"{dbfunc}({string.Join(", ", args.Select(a => e.FreeParse(a)))})";
+                        });
+                        e.Result = callExp.Method.Name switch
+                        {
+                            nameof(Geometry.AsBinary) => Function("ST_AsBinary", new[] { instance }, typeof(byte[])),
+                            nameof(Geometry.AsText) => Function("ST_AsText", new[] { instance }, typeof(string)),
+                            nameof(Geometry.Buffer) => Function("ST_Buffer", new[] { instance }.Concat(arguments).ToArray(), typeof(Geometry)),
+                            nameof(Geometry.Contains) => Function("ST_Contains", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.ConvexHull) => Function("ST_ConvexHull", new[] { instance }, typeof(Geometry)),
+                            nameof(Geometry.CoveredBy) => Function("ST_CoveredBy", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.Covers) => Function("ST_Covers", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.Crosses) => Function("ST_Crosses", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.Disjoint) => Function("ST_Disjoint", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.Difference) => Function("ST_Difference", new[] { instance, arguments[0] }, typeof(Geometry)),
+                            nameof(Geometry.Distance) => Function("ST_Distance", new[] { instance }.Concat(arguments).ToArray(), typeof(double)),
+                            nameof(Geometry.EqualsExact) => Function("ST_OrderingEquals", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.EqualsTopologically) => Function("ST_Equals", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.GetGeometryN) => Function("ST_GeometryN", new[] { instance, arguments[0] }, typeof(Geometry)),
+                            nameof(Polygon.GetInteriorRingN) => Function("ST_InteriorRingN", new[] { instance, arguments[0] }, typeof(Geometry)),
+                            nameof(LineString.GetPointN) => Function("ST_PointN", new[] { instance, arguments[0] }, typeof(Geometry)),
+                            nameof(Geometry.Intersection) => Function("ST_Intersection", new[] { instance, arguments[0] }, typeof(Geometry)),
+                            nameof(Geometry.Intersects) => Function("ST_Intersects", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.IsWithinDistance) => Function("ST_DWithin", new[] { instance }.Concat(arguments).ToArray(), typeof(bool)),
+                            nameof(Geometry.Normalized) => Function("ST_Normalize", new[] { instance }, typeof(Geometry)),
+                            nameof(Geometry.Overlaps) => Function("ST_Overlaps", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.Relate) => Function("ST_Relate", new[] { instance, arguments[0], arguments[1] }, typeof(bool)),
+                            nameof(Geometry.Reverse) => Function("ST_Reverse", new[] { instance }, typeof(Geometry)),
+                            nameof(Geometry.SymmetricDifference) => Function("ST_SymDifference", new[] { instance, arguments[0] }, typeof(Geometry)),
+                            nameof(Geometry.ToBinary) => Function("ST_AsBinary", new[] { instance }, typeof(byte[])),
+                            nameof(Geometry.ToText) => Function("ST_AsText", new[] { instance }, typeof(string)),
+                            nameof(Geometry.Touches) => Function("ST_Touches", new[] { instance, arguments[0] }, typeof(bool)),
+                            nameof(Geometry.Within) => Function("ST_Within", new[] { instance, arguments[0] }, typeof(bool)),
+
+                            nameof(Geometry.Union) when arguments.Count == 0 => Function("ST_UnaryUnion", new[] { instance }, typeof(Geometry)),
+                            nameof(Geometry.Union) when arguments.Count == 1 => Function("ST_Union", new[] { instance, arguments[0] }, typeof(Geometry)),
+
+                            _ => null
+                        };
+
+                    }
+                }
+            };
+            if (fsql.Ado.DataType == DataType.PostgreSQL)
+            {
+                Npgsql.NpgsqlConnection.GlobalTypeMapper.UseNetTopologySuite();
+                var geo = new Point(10, 20);
+                fsql.Select<City>()
+                    .Where(a => geo.Distance(a.Center) < 100).ToList();
+            }
 
             var items = new List<User1>();
             for (var a = 0; a < 3; a++) items.Add(new User1 { Id = Guid.NewGuid(), Avatar = $"avatar{a}" });
@@ -700,42 +1069,12 @@ namespace base_entity
                 Math.PI
             });
 
-            var usergroupRepository = fsql.GetAggregateRootRepository<UserGroup>();
-            usergroupRepository.Delete(a => true);
-            usergroupRepository.Insert(new[]{
-                new UserGroup
-                {
-                    CreateTime = DateTime.Now,
-                    GroupName = "group1",
-                    UpdateTime = DateTime.Now,
-                    Sort = 1,
-                    User1s = new List<User1>
-                    {
-                        new User1 { Nickname = "nickname11", Username = "username11", Description = "desc11" },
-                        new User1 { Nickname = "nickname12", Username = "username12", Description = "desc12" },
-                        new User1 { Nickname = "nickname13", Username = "username13", Description = "desc13" },
-                    }
-                },
-                new UserGroup
-                {
-                    CreateTime = DateTime.Now,
-                    GroupName = "group2",
-                    UpdateTime = DateTime.Now,
-                    Sort = 2,
-                    User1s = new List<User1>
-                    {
-                        new User1 { Nickname = "nickname21", Username = "username21", Description = "desc21" },
-                        new User1 { Nickname = "nickname22", Username = "username22", Description = "desc22" },
-                        new User1 { Nickname = "nickname23", Username = "username23", Description = "desc23" },
-                    }
-                },
-            });
-            var userRepository = fsql.GetAggregateRootRepository<User1>();
-
-            var testsublist1 = fsql.Select<UserGroup>()
+            var testsublist2 = fsql.Select<UserGroup>()
+                .GroupBy(a => new { a.Id })
+                .WithTempQuery(a => a.Key)
                 .First(a => new
                 {
-                    a.Id,
+                    id = a,
                     list = userRepository.Select.Where(b => b.GroupId == a.Id).ToList(),
                     list2 = userRepository.Select.Where(b => b.GroupId == a.Id).ToList(b => b.Nickname),
                 });
@@ -756,8 +1095,8 @@ namespace base_entity
 
             var sqss = fsql.InsertDict(dic).AsTable("table1").ToSql();
             var sqss2 = fsql.InsertDict(diclist).AsTable("table1").ToSql();
-            sqss = fsql.InsertDict(dic).AsTable("table1").NoneParameter(false).ToSql();
-            sqss2 = fsql.InsertDict(diclist).AsTable("table1").NoneParameter(false).ToSql();
+            sqss = fsql.InsertDict(dic).AsTable("table1").NoneParameter().ToSql();
+            sqss2 = fsql.InsertDict(diclist).AsTable("table1").NoneParameter().ToSql();
 
             dic["xxx"] = null;
             dic["yyy"] = 111;
@@ -786,53 +1125,7 @@ namespace base_entity
             });
             var sqldel4 = fsql.DeleteDict(diclist).AsTable("table1").ToSql();
 
-            fsql.Aop.ParseExpression += (_, e) =>
-            {
-                if (e.Expression is MemberExpression memExp == false) return;
-                ParameterExpression parmExp = null;
-                var exps = new List<MemberExpression>();
-                exps.Add(memExp);
-                while (memExp.Expression != null)
-                {
-                    if (memExp.Expression is MemberExpression parentExp)
-                    {
-                        exps.Add(parentExp);
-                        memExp = parentExp;
-                        if (fsql.CodeFirst.GetTableByEntity(memExp.Type) == null) return;
-                        continue;
-                    }
-                    if (memExp.Expression is ParameterExpression parmExp2)
-                    {
-                        parmExp = parmExp2;
-                        break;
-                    }
-                    return;
-                }
-                if (parmExp == null) return;
-                if (e.Tables == null) return;
-                var oldTables = e.Tables.ToArray();
-                var result = e.FreeParse(e.Expression);
-                for (var a = oldTables.Length; a < e.Tables.Count; a++)
-                {
-                    if (string.IsNullOrEmpty(e.Tables[a].NavigateCondition) == false) continue;
-                    var parentTableAlias = e.Tables[a].Alias?.Split(new[] { "__" }, StringSplitOptions.None);
-                    if (parentTableAlias == null || parentTableAlias.Length <= 1) continue;
-                    var parentTable = e.Tables.Where(c => c.Alias == string.Join("__", parentTableAlias.Take(parentTableAlias.Length - 1))).FirstOrDefault();
-                    if (parentTable == null || parentTable.Table.Properties.TryGetValue(parentTableAlias.Last(), out var navProp) == false) continue;
-                    var joinAttr = navProp.GetCustomAttribute<JoinConditionAttribute>();
-                    if (joinAttr == null) continue;
-                    e.Tables[a].NavigateCondition = joinAttr.Condition
-                        .Replace("a.", e.Tables[a].Alias + ".")
-                        .Replace("b.", parentTable.Alias + ".");
-                }
-            };
-            var joinsql1 = fsql.Select<JoinTest01>()
-                .Include(a => a.Parent.Parent)
-                .Where(a => a.Parent.Parent.code == "001")
-                .Where(a => a.JoinTest01Enum == JoinTest01Enum.f3.ToString())
-                .Where(a => object.Equals(a.JoinTest01Enum, JoinTest01Enum.f3))
-                .Where(a => new[] { JoinTest01Enum.f2, JoinTest01Enum.f3 }.Contains(a.JoinTest01Enum2))
-                .ToSql();
+            
 
 
             fsql.Aop.ConfigEntity += (_, e) =>
@@ -978,10 +1271,10 @@ namespace base_entity
                 .ToList();
 
 
-            var atimpl = fsql.CodeFirst.GetTableByEntity(typeof(AsTableLog))
+            var atimpl2 = fsql.CodeFirst.GetTableByEntity(typeof(AsTableLog))
                 .AsTableImpl;
 
-            atimpl.GetTableNameByColumnValue(DateTime.Parse("2023-7-1"), autoExpand: true);
+            atimpl2.GetTableNameByColumnValue(DateTime.Parse("2023-7-1"), autoExpand: true);
 
 
             fsql.Select<User1, UserGroup>()
@@ -1362,109 +1655,7 @@ namespace base_entity
             //    .ToSql();
             #endregion
 
-            var testitems = new[]
-            {
-                new AsTableLog{ msg = "msg01", createtime = DateTime.Parse("2022-1-1 13:00:11"), click = 1 },
-                new AsTableLog{ msg = "msg02", createtime = DateTime.Parse("2022-1-2 14:00:12"), click = 2 },
-                new AsTableLog{ msg = "msg03", createtime = DateTime.Parse("2022-2-2 15:00:13"), click = 3 },
-                new AsTableLog{ msg = "msg04", createtime = DateTime.Parse("2022-2-8 15:00:13"), click = 4 },
-                new AsTableLog{ msg = "msg05", createtime = DateTime.Parse("2022-3-8 15:00:13"), click = 5 },
-                new AsTableLog{ msg = "msg06", createtime = DateTime.Parse("2022-4-8 15:00:13"), click = 6 },
-                new AsTableLog{ msg = "msg07", createtime = DateTime.Parse("2022-6-8 15:00:13"), click = 7 },
-                new AsTableLog{ msg = "msg07", createtime = DateTime.Parse("2022-7-1"), click = 8}
-            };
-            var sqlatb = fsql.Insert(testitems).NoneParameter();
-            var sqlat = sqlatb.ToSql();
-            var sqlatr = sqlatb.ExecuteAffrows();
-
-            var sqlatc1 = fsql.Delete<AsTableLog>().Where(a => a.id == Guid.NewGuid() && a.createtime == DateTime.Parse("2022-3-8 15:00:13"));
-            var sqlatca1 = sqlatc1.ToSql();
-            var sqlatcr1 = sqlatc1.ExecuteAffrows();
-
-            var sqlatc2 = fsql.Delete<AsTableLog>().Where(a => a.id == Guid.NewGuid() && a.createtime == DateTime.Parse("2021-3-8 15:00:13"));
-            var sqlatca2 = sqlatc2.ToSql();
-            var sqlatcr2 = sqlatc2.ExecuteAffrows();
-
-            var sqlatc = fsql.Delete<AsTableLog>().Where(a => a.id == Guid.NewGuid() && a.createtime.Between(DateTime.Parse("2022-3-1"), DateTime.Parse("2022-5-1")));
-            var sqlatca = sqlatc.ToSql();
-            var sqlatcr = sqlatc.ExecuteAffrows();
-
-            var sqlatd1 = fsql.Update<AsTableLog>().SetSource(testitems[0]);
-            var sqlatd101 = sqlatd1.ToSql();
-            var sqlatd102 = sqlatd1.ExecuteAffrows();
-
-            var sqlatd2 = fsql.Update<AsTableLog>().SetSource(testitems[5]);
-            var sqlatd201 = sqlatd2.ToSql();
-            var sqlatd202 = sqlatd2.ExecuteAffrows();
-
-            var sqlatd3 = fsql.Update<AsTableLog>().SetSource(testitems);
-            var sqlatd301 = sqlatd3.ToSql();
-            var sqlatd302 = sqlatd3.ExecuteAffrows();
-
-            var sqlatd4 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg");
-            var sqlatd401 = sqlatd4.ToSql();
-            var sqlatd402 = sqlatd4.ExecuteAffrows();
-
-            var sqlatd5 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime.Between(DateTime.Parse("2022-3-1"), DateTime.Parse("2022-5-1")));
-            var sqlatd501 = sqlatd5.ToSql();
-            var sqlatd502 = sqlatd5.ExecuteAffrows();
-
-            var sqlatd6 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime > DateTime.Parse("2022-3-1") && a.createtime < DateTime.Parse("2022-5-1"));
-            var sqlatd601 = sqlatd6.ToSql();
-            var sqlatd602 = sqlatd6.ExecuteAffrows();
-
-            var sqlatd7 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime > DateTime.Parse("2022-3-1"));
-            var sqlatd701 = sqlatd7.ToSql();
-            var sqlatd702 = sqlatd7.ExecuteAffrows();
-
-            var sqlatd8 = fsql.Update<AsTableLog>(Guid.NewGuid()).Set(a => a.msg == "newmsg").Where(a => a.createtime < DateTime.Parse("2022-5-1"));
-            var sqlatd801 = sqlatd8.ToSql();
-            var sqlatd802 = sqlatd8.ExecuteAffrows();
-
-            var sqlatd12 = fsql.InsertOrUpdate<AsTableLog>().SetSource(testitems[0]);
-            var sqlatd1201 = sqlatd12.ToSql();
-            var sqlatd1202 = sqlatd12.ExecuteAffrows();
-
-            var sqlatd22 = fsql.InsertOrUpdate<AsTableLog>().SetSource(testitems[5]);
-            var sqlatd2201 = sqlatd22.ToSql();
-            var sqlatd2202 = sqlatd22.ExecuteAffrows();
-
-            var sqlatd32 = fsql.InsertOrUpdate<AsTableLog>().SetSource(testitems);
-            var sqlatd3201 = sqlatd32.ToSql();
-            var sqlatd3202 = sqlatd32.ExecuteAffrows();
-
-            var sqls1 = fsql.Select<AsTableLog>().OrderBy(a => a.createtime);
-            var sqls101 = sqls1.ToSql();
-            var sqls102 = sqls1.ToList();
-
-            var sqls2 = fsql.Select<AsTableLog>().Where(a => a.createtime.Between(DateTime.Parse("2022-3-1"), DateTime.Parse("2022-5-1")));
-            var sqls201 = sqls2.ToSql();
-            var sqls202 = sqls2.ToList();
-
-            var sqls3 = fsql.Select<AsTableLog>().Where(a => a.createtime > DateTime.Parse("2022-3-1") && a.createtime < DateTime.Parse("2022-5-1"));
-            var sqls301 = sqls3.ToSql();
-            var sqls302 = sqls3.ToList();
-
-            var sqls4 = fsql.Select<AsTableLog>().Where(a => a.createtime > DateTime.Parse("2022-3-1"));
-            var sqls401 = sqls4.ToSql();
-            var sqls402 = sqls4.ToList();
-
-            var sqls5 = fsql.Select<AsTableLog>().Where(a => a.createtime < DateTime.Parse("2022-5-1"));
-            var sqls501 = sqls5.ToSql();
-            var sqls502 = sqls5.ToList();
-
-            var sqls6 = fsql.Select<AsTableLog>().Where(a => a.createtime < DateTime.Parse("2022-5-1")).Limit(10).OrderBy(a => a.createtime);
-            var sqls601 = sqls6.ToSql();
-            var sqls602 = sqls6.ToList();
-
-            var sqls7 = fsql.Select<AsTableLog>().Where(a => a.createtime < DateTime.Parse("2022-5-1")).ToAggregate(g => new
-            {
-                sum1 = g.Sum(g.Key.click),
-                cou1 = g.Count(),
-                avg1 = g.Avg(g.Key.click),
-                min = g.Min(g.Key.click),
-                max = g.Max(g.Key.click)
-            });
+            
 
             fsql.Aop.AuditValue += new EventHandler<FreeSql.Aop.AuditValueEventArgs>((_, e) =>
             {
@@ -1911,7 +2102,7 @@ namespace base_entity
         public virtual string Code { get; set; }
         public virtual string Name { get; set; }
     }
-    [Table(Name = "`FreeSqlTest`.`bdd_1`")]
+    [Table(Name = "`bdd_1`")]
     class GoodsData : BaseDataEntity
     {
         public override Int32 CategoryId { get; set; }

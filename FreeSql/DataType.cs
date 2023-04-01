@@ -8,7 +8,7 @@ namespace FreeSql
 
         MySql, SqlServer, PostgreSQL, Oracle, Sqlite,
 
-        OdbcOracle, OdbcSqlServer, OdbcMySql, OdbcPostgreSQL, 
+        OdbcOracle, OdbcSqlServer, OdbcMySql, OdbcPostgreSQL,
 
         /// <summary>
         /// 通用的 Odbc 实现，只能做基本的 Crud 操作 <para></para>
@@ -68,6 +68,13 @@ namespace FreeSql
         /// 天津南大通用数据技术股份有限公司成立于2004年,是国产数据库、大数据领域的知名企业，基于 Odbc 的实现
         /// </summary>
         GBase,
+
+        QuestDb,
+
+        /// <summary>
+        /// 虚谷
+        /// </summary>
+        Xugu,
 
         CustomOracle, CustomSqlServer, CustomMySql, CustomPostgreSQL
     }

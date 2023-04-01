@@ -268,7 +268,7 @@ namespace FreeSql
                         type = Type.GetType("FreeSql.Odbc.Default.OdbcProvider`1,FreeSql.Provider.Odbc")?.MakeGenericType(typeof(TMark));
                         if (type == null) throwNotFind("FreeSql.Provider.Odbc.dll", "FreeSql.Odbc.Default.OdbcProvider<>");
                         break;
-
+                  
                     case DataType.OdbcDameng:
                         type = Type.GetType("FreeSql.Odbc.Dameng.OdbcDamengProvider`1,FreeSql.Provider.Odbc")?.MakeGenericType(typeof(TMark));
                         if (type == null) throwNotFind("FreeSql.Provider.Odbc.dll", "FreeSql.Odbc.Dameng.OdbcDamengProvider<>");
@@ -319,6 +319,17 @@ namespace FreeSql
                         if (type == null) throwNotFind("FreeSql.Provider.GBase.dll", "FreeSql.GBase.GBaseProvider<>");
                         break;
 
+                    case DataType.QuestDb:
+                        type = Type.GetType("FreeSql.QuestDb.QuestDbProvider`1,FreeSql.Provider.QuestDb")?.MakeGenericType(typeof(TMark));
+                        if (type == null)
+                            throwNotFind("FreeSql.Provider.QuestDb.dll", "FreeSql.QuestDb.QuestDbProvider<>");
+                        break;
+
+                    case DataType.Xugu:
+                        type = Type.GetType("FreeSql.Xugu.XuguProvider`1,FreeSql.Provider.Xugu")?.MakeGenericType(typeof(TMark));
+                        if (type == null) throwNotFind("FreeSql.Provider.Xugu.dll", "FreeSql.Xugu.XuguProvider<>");
+                        break;
+
                     case DataType.CustomOracle:
                         type = Type.GetType("FreeSql.Custom.Oracle.CustomOracleProvider`1,FreeSql.Provider.Custom")?.MakeGenericType(typeof(TMark));
                         if (type == null) throwNotFind("FreeSql.Provider.Custom.dll", "FreeSql.Custom.Oracle.CustomOracleProvider<>");
@@ -338,7 +349,7 @@ namespace FreeSql
                         type = Type.GetType("FreeSql.Custom.PostgreSQL.CustomPostgreSQLProvider`1,FreeSql.Provider.Custom")?.MakeGenericType(typeof(TMark));
                         if (type == null) throwNotFind("FreeSql.Provider.Custom.dll", "FreeSql.Custom.PostgreSQL.CustomPostgreSQLProvider<>");
                         break;
-
+                     
                     default: throw new Exception(CoreStrings.NotSpecified_UseConnectionString_UseConnectionFactory);
                 }
             }
@@ -369,29 +380,29 @@ namespace FreeSql
                     switch (_nameConvertType)
                     {
                         case NameConvertType.ToLower:
-                            ret.Aop.ConfigEntity += (_, e) => e.ModifyResult.Name = e.ModifyResult.Name?.ToLower();
+                            ret.Aop.ConfigEntity += (_, e) => { if (string.IsNullOrWhiteSpace(e.ModifyResult.AsTable)) e.ModifyResult.Name = e.ModifyResult.Name?.ToLower(); };
                             ret.Aop.ConfigEntityProperty += (_, e) => e.ModifyResult.Name = e.ModifyResult.Name?.ToLower();
                             ret.CodeFirst.IsSyncStructureToLower = true;
                             break;
                         case NameConvertType.ToUpper:
-                            ret.Aop.ConfigEntity += (_, e) => e.ModifyResult.Name = e.ModifyResult.Name?.ToUpper();
+                            ret.Aop.ConfigEntity += (_, e) => { if (string.IsNullOrWhiteSpace(e.ModifyResult.AsTable)) e.ModifyResult.Name = e.ModifyResult.Name?.ToUpper(); };
                             ret.Aop.ConfigEntityProperty += (_, e) => e.ModifyResult.Name = e.ModifyResult.Name?.ToUpper();
                             ret.CodeFirst.IsSyncStructureToUpper = true;
                             break;
                         case NameConvertType.PascalCaseToUnderscore:
-                            ret.Aop.ConfigEntity += (_, e) => e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name);
+                            ret.Aop.ConfigEntity += (_, e) => { if (string.IsNullOrWhiteSpace(e.ModifyResult.AsTable)) e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name); };
                             ret.Aop.ConfigEntityProperty += (_, e) => e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name);
                             break;
                         case NameConvertType.PascalCaseToUnderscoreWithLower:
-                            ret.Aop.ConfigEntity += (_, e) => e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name)?.ToLower();
+                            ret.Aop.ConfigEntity += (_, e) => { if (string.IsNullOrWhiteSpace(e.ModifyResult.AsTable)) e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name)?.ToLower(); };
                             ret.Aop.ConfigEntityProperty += (_, e) => e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name)?.ToLower();
                             break;
                         case NameConvertType.PascalCaseToUnderscoreWithUpper:
-                            ret.Aop.ConfigEntity += (_, e) => e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name)?.ToUpper();
+                            ret.Aop.ConfigEntity += (_, e) => { if (string.IsNullOrWhiteSpace(e.ModifyResult.AsTable)) e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name)?.ToUpper(); };
                             ret.Aop.ConfigEntityProperty += (_, e) => e.ModifyResult.Name = PascalCaseToUnderScore(e.ModifyResult.Name)?.ToUpper();
                             break;
                         //case NameConvertType.UnderscoreToPascalCase:
-                        //    ret.Aop.ConfigEntity += (_, e) => e.ModifyResult.Name = UnderScorePascalCase(e.ModifyResult.Name);
+                        //    ret.Aop.ConfigEntity += (_, e) => { if (string.IsNullOrWhiteSpace(e.ModifyResult.AsTable)) e.ModifyResult.Name = UnderScorePascalCase(e.ModifyResult.Name); };
                         //    ret.Aop.ConfigEntityProperty += (_, e) => e.ModifyResult.Name = UnderScorePascalCase(e.ModifyResult.Name);
                         //    break;
                         default:

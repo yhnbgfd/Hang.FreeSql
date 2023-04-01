@@ -27,6 +27,16 @@ public class RoleUser1 : BaseEntity<RoleUser1>
     public User1 User1 { get; set; }
 }
 
+public class IdentityUser1
+{
+    [Column(IsIdentity = true)]
+    public int Id { get; set; }
+    [MaxLength(32)]
+    public string Username { get; set; }
+    [MaxLength(64), Column(InsertValueSql = "'defaultname'")]
+    public string Nickname { get; set; }
+}
+
 public class User1 : BaseEntity<User1, Guid>
 {
     public int GroupId { get; set; }
@@ -55,7 +65,7 @@ public class User1 : BaseEntity<User1, Guid>
     /// <summary>
     /// 描述
     /// </summary>
-    [MaxLength(4000)]
+    [MaxLength(2000)]
     public string Description { get; set; }
 }
 

@@ -328,29 +328,39 @@ namespace FreeSql.Internal
                             {
                                 if (dtTb.Table.ColumnsByCs.TryGetValue(dtoProp.Name, out var trydtocol) == false)
                                 {
-                                    if (diymemexp != null && dtTb.Parameter != null && dtTb.Parameter.Type.GetPropertiesDictIgnoreCase().TryGetValue(dtoProp.Name, out var dtTbProp))
+                                    if (diymemexp != null && dtTb.Parameter != null)
                                     {
-                                        var dbfield = diymemexp.ParseExp(new Expression[] { Expression.MakeMemberAccess(dtTb.Parameter, dtTbProp) });
-                                        if (diymemexp.ParseExpMapResult != null)
+                                        var isBreaked = false;
+                                        var dbTbExps = MatchDtoPropertys(dtTb, dtoProp); //嵌套查询临时类，可能匹配到多个 DTO
+                                        foreach (var dbTbExp in dbTbExps)
                                         {
-                                            var diychild = new ReadAnonymousTypeInfo
+                                            if (dbTbExp?.Any() == true)
                                             {
-                                                Property = dtoProp,
-                                                CsName = dtoProp.Name,
-                                                CsType = dtTbProp.PropertyType,
-                                                MapType = dtTbProp.PropertyType
-                                            };
-                                            parent.Childs.Add(diychild);
-                                            diychild.DbField = $"{dtTb.Alias}.{diymemexp.ParseExpMapResult.DbNestedField}";
-                                            diychild.DbNestedField = diymemexp.ParseExpMapResult.DbNestedField;
-                                            field.Append(", ").Append(diychild.DbField);
-                                            if (index >= 0)
-                                            {
-                                                diychild.DbNestedField = $"as{++index}";
-                                                field.Append(_common.FieldAsAlias(diychild.DbNestedField));
+                                                var dbfield = diymemexp.ParseExp(dbTbExp);
+                                                if (diymemexp.ParseExpMapResult != null)
+                                                {
+                                                    var diychild = new ReadAnonymousTypeInfo
+                                                    {
+                                                        Property = dtoProp,
+                                                        CsName = dtoProp.Name,
+                                                        CsType = dbTbExp.LastOrDefault().Type,
+                                                        MapType = dbTbExp.LastOrDefault().Type
+                                                    };
+                                                    parent.Childs.Add(diychild);
+                                                    diychild.DbField = $"{dtTb.Alias}.{diymemexp.ParseExpMapResult.DbNestedField}";
+                                                    diychild.DbNestedField = diymemexp.ParseExpMapResult.DbNestedField;
+                                                    field.Append(", ").Append(diychild.DbField);
+                                                    if (index >= 0)
+                                                    {
+                                                        diychild.DbNestedField = $"as{++index}";
+                                                        field.Append(_common.FieldAsAlias(diychild.DbNestedField));
+                                                    }
+                                                    isBreaked = true;
+                                                    break;
+                                                }
                                             }
-                                            break;
                                         }
+                                        if (isBreaked) break;
                                     }
                                     continue;
                                 }
@@ -450,29 +460,39 @@ namespace FreeSql.Internal
                             {
                                 if (dtTb.Table.ColumnsByCs.TryGetValue(dtoProp.Name, out var trydtocol) == false)
                                 {
-                                    if (diymemexp != null && dtTb.Parameter != null && dtTb.Parameter.Type.GetPropertiesDictIgnoreCase().TryGetValue(dtoProp.Name, out var dtTbProp))
+                                    if (diymemexp != null && dtTb.Parameter != null)
                                     {
-                                        var dbfield = diymemexp.ParseExp(new Expression[] { Expression.MakeMemberAccess(dtTb.Parameter, dtTbProp) });
-                                        if (diymemexp.ParseExpMapResult != null)
+                                        var isBreaked = false;
+                                        var dbTbExps = MatchDtoPropertys(dtTb, dtoProp); //嵌套查询临时类，可能匹配到多个 DTO
+                                        foreach (var dbTbExp in dbTbExps)
                                         {
-                                            var diychild = new ReadAnonymousTypeInfo
+                                            if (dbTbExp?.Any() == true)
                                             {
-                                                Property = dtoProp,
-                                                CsName = dtoProp.Name,
-                                                CsType = dtTbProp.PropertyType,
-                                                MapType = dtTbProp.PropertyType
-                                            };
-                                            parent.Childs.Add(diychild);
-                                            diychild.DbField = $"{dtTb.Alias}.{diymemexp.ParseExpMapResult.DbNestedField}";
-                                            diychild.DbNestedField = diymemexp.ParseExpMapResult.DbNestedField;
-                                            field.Append(", ").Append(diychild.DbField);
-                                            if (index >= 0)
-                                            {
-                                                diychild.DbNestedField = $"as{++index}";
-                                                field.Append(_common.FieldAsAlias(diychild.DbNestedField));
+                                                var dbfield = diymemexp.ParseExp(dbTbExp);
+                                                if (diymemexp.ParseExpMapResult != null)
+                                                {
+                                                    var diychild = new ReadAnonymousTypeInfo
+                                                    {
+                                                        Property = dtoProp,
+                                                        CsName = dtoProp.Name,
+                                                        CsType = dbTbExp.LastOrDefault().Type,
+                                                        MapType = dbTbExp.LastOrDefault().Type
+                                                    };
+                                                    parent.Childs.Add(diychild);
+                                                    diychild.DbField = $"{dtTb.Alias}.{diymemexp.ParseExpMapResult.DbNestedField}";
+                                                    diychild.DbNestedField = diymemexp.ParseExpMapResult.DbNestedField;
+                                                    field.Append(", ").Append(diychild.DbField);
+                                                    if (index >= 0)
+                                                    {
+                                                        diychild.DbNestedField = $"as{++index}";
+                                                        field.Append(_common.FieldAsAlias(diychild.DbNestedField));
+                                                    }
+                                                    isBreaked = true;
+                                                    break;
+                                                }
                                             }
-                                            break;
                                         }
+                                        if (isBreaked) break;
                                     }
                                     continue;
                                 }
@@ -935,12 +955,12 @@ namespace FreeSql.Internal
                     return $"not({ExpressionLambdaToSql(notExp, tsc)})";
                 case ExpressionType.Quote: return ExpressionLambdaToSql((exp as UnaryExpression)?.Operand, tsc);
                 case ExpressionType.Lambda: return ExpressionLambdaToSql((exp as LambdaExpression)?.Body, tsc);
-                //case ExpressionType.Invoke: return formatSql(Expression.Lambda(exp).Compile().DynamicInvoke(), tsc.mapType, tsc.mapColumnTmp, tsc.dbParams);
-                case ExpressionType.Invoke:
+                case ExpressionType.Invoke: //#1378
                     var invokeExp = exp as InvocationExpression;
-                    var invokeReplaceVistor = new FreeSql.Internal.CommonExpression.ReplaceVisitor();
                     var invokeReplaceExp = invokeExp.Expression;
-                    var invokeLambdaExp = invokeReplaceExp as LambdaExpression;
+                    var invokeLambdaExp = invokeReplaceExp as LambdaExpression; 
+                    if (invokeLambdaExp == null) return formatSql(Expression.Lambda(exp).Compile().DynamicInvoke(), tsc.mapType, tsc.mapColumnTmp, tsc.dbParams);
+                    var invokeReplaceVistor = new FreeSql.Internal.CommonExpression.ReplaceVisitor();
                     var len = Math.Min(invokeExp.Arguments.Count, invokeLambdaExp.Parameters.Count);
                     for (var a = 0; a < len; a++)
                         invokeReplaceExp = invokeReplaceVistor.Modify(invokeReplaceExp, invokeLambdaExp.Parameters[a], invokeExp.Arguments[a]);
@@ -1408,7 +1428,7 @@ namespace FreeSql.Internal
                                         }
 
                                         var parm123Tb = _common.GetTableByEntity(asSelectParentExp.Type);
-                                        var parm123Ref = parm123Tb.GetTableRef(asSelectParentExp1.Member.Name, true);
+                                        var parm123Ref = parm123Tb.GetTableRef(asSelectParentExp1.Member.Name, true, true);
                                         if (parm123Ref != null)
                                         {
                                             if (parm123Ref.RefType == TableRefType.PgArrayToMany)
@@ -1723,6 +1743,8 @@ namespace FreeSql.Internal
                                         expStack.Push(oper2Parm);
                                     else if (oper2Parm.Type != typeof(object) && oper2Parm.Type.IsAssignableFrom(exp2.Type))
                                         expStack.Push(oper2Parm);
+                                    else if (oper2Parm.Type == typeof(object) && tsc._tables != null && tsc._tables[0].Table != null && exp2.Type.IsAssignableFrom(tsc._tables[0].Table.Type) == true)
+                                        expStack.Push(oper2Parm);
                                     else
                                         expStack.Push(Expression.Parameter(exp2.Type, oper2Parm.Name));
                                 }
@@ -1880,7 +1902,7 @@ namespace FreeSql.Internal
                             { //导航条件，OneToOne、ManyToOne
                                 var firstTb = tsc._tables.First().Table;
                                 var parentTb = _common.GetTableByEntity(mp.Expression.Type);
-                                var parentTbRef = parentTb?.GetTableRef(mp.Member.Name, tsc.style == ExpressionStyle.AsSelect);
+                                var parentTbRef = parentTb?.GetTableRef(mp.Member.Name, tsc.style == ExpressionStyle.AsSelect, true);
                                 if (parentTbRef != null)
                                 {
                                     Expression navCondExp = null;
@@ -1993,7 +2015,7 @@ namespace FreeSql.Internal
                                     }
                                     if (tb2.ColumnsByCsIgnore.ContainsKey(mp2.Member.Name))
                                         throw new ArgumentException(CoreStrings.Ignored_Check_Confirm_PublicGetSet(tb2.DbName, mp2.Member.Name));
-                                    if (tb2.GetTableRef(mp2.Member.Name, false) != null)
+                                    if (tb2.GetTableRef(mp2.Member.Name, false, true) != null)
                                         throw new ArgumentException(CoreStrings.Navigation_Missing_AsSelect(tb2.DbName, mp2.Member.Name));
                                     throw new ArgumentException(CoreStrings.NotFound_Column(tb2.DbName, mp2.Member.Name));
                                 }
@@ -2488,6 +2510,53 @@ namespace FreeSql.Internal
             //return string.Concat(_ado.AddslashesProcessParam(obj, mapType, mapColumn));
         }
 
+        public List<Expression[]> MatchDtoPropertys(SelectTableInfo tb, PropertyInfo dtoProp)
+        {
+            if (tb == null || dtoProp == null || tb.Parameter == null) return null;
+            var retList = new List<Expression[]>();
+            var retExp = LocalMatch(tb.Parameter.Type, tb.Parameter);
+            if (retList.Any() == false) retList.Add(new[] { retExp });
+            return retList;
+
+            Expression LocalMatch(Type type, Expression memExp)
+            {
+                var typeProps = type.GetPropertiesDictIgnoreCase();
+                if (typeProps.TryGetValue(dtoProp.Name, out var prop))
+                    return Expression.MakeMemberAccess(memExp, prop);
+                if (tb.Table.Columns.Any() == false) //匿名类，嵌套查询 DTO
+                {
+                    foreach (var typeProp in typeProps.Values)
+                    {
+                        if (Utils.dicExecuteArrayRowReadClassOrTuple.ContainsKey(typeProp.PropertyType)) continue;
+                        if (typeProp.PropertyType.IsAnonymousType() || _common.GetTableByEntity(typeProp.PropertyType)?.Columns.Any() == true)
+                        {
+                            var nextExp = Expression.MakeMemberAccess(memExp, typeProp);
+                            var ret = LocalMatch(typeProp.PropertyType, nextExp);
+                            if (ret != null)
+                            {
+                                var expPath = LocalGetExpressionPath(ret);
+                                if (expPath != null) retList.Add(expPath);
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+            Expression[] LocalGetExpressionPath(Expression exp)
+            {
+                if (exp == null) return null;
+                var exps = new Stack<Expression>();
+                while (true)
+                {
+                    exps.Push(exp);
+                    exp = (exp as MemberExpression).Expression;
+                    if (exp.NodeType == ExpressionType.Parameter) break;
+                }
+                if (exps.Any()) return exps.ToArray();
+                return null;
+            }
+        }
+
         public static void ParseExpressionNoAsSelect(object sender, Aop.ParseExpressionEventArgs e, Func<Type, string, string> tableRule, List<GlobalFilter.Item> whereGlobalFilter)
         {
             if (e.Expression.NodeType != ExpressionType.Call &&
@@ -2650,7 +2719,7 @@ namespace FreeSql.Internal
                     }
                     if (select != null) return;
                     memberExp = tmpExp;
-                    memberTbref = exp3Tb.GetTableRef(memberExp.Member.Name, false);
+                    memberTbref = exp3Tb.GetTableRef(memberExp.Member.Name, false, true);
                     if (memberTbref == null) return;
                     switch (memberTbref.RefType)
                     {

@@ -123,34 +123,49 @@ namespace FreeSql.Internal.CommonProvider
         public abstract ISelect<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15> From<T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>(Expression<Func<ISelectFromExpression<T1>, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, ISelectFromExpression<T1>>> exp = null) where T2 : class where T3 : class where T4 : class where T5 : class where T6 : class where T7 : class where T8 : class where T9 : class where T10 : class where T11 : class where T12 : class where T13 : class where T14 : class where T15 : class;
         public abstract ISelect<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16> From<T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16>(Expression<Func<ISelectFromExpression<T1>, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, ISelectFromExpression<T1>>> exp = null) where T2 : class where T3 : class where T4 : class where T5 : class where T6 : class where T7 : class where T8 : class where T9 : class where T10 : class where T11 : class where T12 : class where T13 : class where T14 : class where T15 : class where T16 : class;
 
-
         public ISelect<T1, T2> FromQuery<T2>(ISelect<T2> select2) where T2 : class
         {
             var ret = From<T2>();
+            return FromQueryMulti(ret, new[] { typeof(T2) }, new[] { select2 as Select0Provider });
+        }
+
+        public TQuery FromQueryMulti<TQuery>(TQuery ret, Type[] entityTypes, Select0Provider[] querys)
+        {
             var retsp = ret as Select0Provider;
             var rettbs = retsp._tables;
-            if (rettbs[1].Table == null) rettbs[1].Table = TableInfo.GetDefaultTable(typeof(T2));
-            (_diymemexpWithTempQuery as WithTempQueryParser)?.Append(select2, rettbs[1]);
-            var select2sp = select2 as Select0Provider;
-            string sql2 = null;
-            if (select2sp._diymemexpWithTempQuery == null)
+            var sql2List = new string[querys.Length];
+            for (var a = 0; a < querys.Length; a++)
             {
-                if (select2sp._tableRule == null && select2sp._tables[0].Table.Type == typeof(T2) && select2sp.IsDefaultSqlContent == true)
-                    return ret;
-                sql2 = select2?.ToSql(a => a, FieldAliasOptions.AsProperty);
-            }
-            else
-            {
-                if (retsp._diymemexpWithTempQuery == null)
-                    retsp._diymemexpWithTempQuery = new WithTempQueryParser(null, null, null, null).Append(select2, rettbs[1]);
-                if (select2sp._tableRule != null && select2sp.IsDefaultSqlContent == true)
+                var select2 = querys[a];
+                var entityType2 = entityTypes[a];
+                var rettb2 = rettbs[a + 1];
+                if (rettb2.Table == null) rettb2.Table = TableInfo.GetDefaultTable(entityType2);
+                (retsp._diymemexpWithTempQuery as WithTempQueryParser)?.Append(select2, rettb2);
+                string sql2 = null;
+                if (select2._diymemexpWithTempQuery == null)
                 {
-                    sql2 = select2sp._tableRule(select2sp._tables[0].Table.Type, null);
-                    if (sql2.StartsWith("(") && sql2.EndsWith(")")) sql2 = sql2.Substring(1, sql2.Length - 2);
-                    if (sql2.StartsWith(" \r\n")) sql2 = sql2.Substring(3);
+                    if (select2._tableRule == null && select2._tables[0].Table.Type == entityType2 && select2.IsDefaultSqlContent == true)
+                        continue;
+                    var selectorParameter = Expression.Parameter(entityType2, select2._tables[0].Alias);
+                    var selector = Expression.Lambda(selectorParameter, selectorParameter);
+                    select2._tables[0].Parameter = selectorParameter;
+                    var af = select2.GetExpressionField(selector, FieldAliasOptions.AsProperty);
+                    sql2 = select2.ToSqlBase(af.field);
                 }
-                if (string.IsNullOrWhiteSpace(sql2))
-                    sql2 = select2?.ToSql("*");
+                else
+                {
+                    if (retsp._diymemexpWithTempQuery == null)
+                        retsp._diymemexpWithTempQuery = new WithTempQueryParser(null, null, null, null).Append(select2, rettb2);
+                    if (select2._tableRule != null && select2.IsDefaultSqlContent == true)
+                    {
+                        sql2 = select2._tableRule(select2._tables[0].Table.Type, null);
+                        if (sql2.StartsWith("(") && sql2.EndsWith(")")) sql2 = sql2.Substring(1, sql2.Length - 2);
+                        if (sql2.StartsWith(" \r\n")) sql2 = sql2.Substring(3);
+                    }
+                    if (string.IsNullOrWhiteSpace(sql2))
+                        sql2 = select2.ToSqlBase("*");
+                }
+                sql2List[a] = sql2;
             }
             if (retsp._tableRules.Count > 0)
             {
@@ -163,15 +178,39 @@ namespace FreeSql.Internal.CommonProvider
                         retsp._tableRules.Add((type, old) =>
                         {
                             if (type == typeof(T1)) return tbruler1;
-                            if (type == typeof(T2)) return $"( \r\n{sql2})";
-
+                            for (var a = 0; a < entityTypes.Length; a++)
+                                if (entityTypes[a] == type) return string.IsNullOrWhiteSpace(sql2List[a]) ? old : $"( \r\n{sql2List[a]})";
                             return old;
                         });
                 });
             }
-            if (retsp._tableRules.Count == 0) ret.WithSql(null, $" \r\n{sql2}");
+            if (retsp._tableRules.Count == 0)
+            {
+                retsp.AsTableBase((type, old) =>
+                {
+                    for (var a = 0; a < entityTypes.Length; a++)
+                        if (entityTypes[a] == type) return string.IsNullOrWhiteSpace(sql2List[a]) ? old : $"( \r\n{sql2List[a]})";
+                    return old;
+                });
+            }
             return ret;
         }
+        public ISelect<T1, T2, T3> FromQuery<T2, T3>(ISelect<T2> select2, ISelect<T3> select3) where T2 : class where T3 : class
+        {
+            var ret = From<T2, T3>();
+            return FromQueryMulti(ret, new[] { typeof(T2), typeof(T3) }, new[] { select2 as Select0Provider, select3 as Select0Provider });
+        }
+        public ISelect<T1, T2, T3, T4> FromQuery<T2, T3, T4>(ISelect<T2> select2, ISelect<T3> select3, ISelect<T4> select4) where T2 : class where T3 : class where T4 : class
+        {
+            var ret = From<T2, T3, T4>();
+            return FromQueryMulti(ret, new[] { typeof(T2), typeof(T3), typeof(T4) }, new[] { select2 as Select0Provider, select3 as Select0Provider, select4 as Select0Provider });
+        }
+        public ISelect<T1, T2, T3, T4, T5> FromQuery<T2, T3, T4, T5>(ISelect<T2> select2, ISelect<T3> select3, ISelect<T4> select4, ISelect<T5> select5) where T2 : class where T3 : class where T4 : class where T5 : class
+        {
+            var ret = From<T2, T3, T4, T5>();
+            return FromQueryMulti(ret, new[] { typeof(T2), typeof(T3), typeof(T4), typeof(T5) }, new[] { select2 as Select0Provider, select3 as Select0Provider, select4 as Select0Provider, select5 as Select0Provider });
+        }
+        
         public ISelect<T1> UnionAll(params ISelect<T1>[] querys)
         {
             var sql1 = this.ToSql();
@@ -332,7 +371,12 @@ namespace FreeSql.Internal.CommonProvider
             }
             return ret;
         }
-        public List<TDto> ToList<TDto>() => typeof(T1) == typeof(TDto) ? ToList() as List<TDto> : ToList(GetToListDtoSelector<TDto>());
+        public List<TDto> ToList<TDto>()
+        {
+            if (typeof(T1) == typeof(TDto)) return ToList() as List<TDto>;
+            if (_tables.FirstOrDefault()?.Table.Type == typeof(object)) return ToList<TDto>("*");
+            return ToList(GetToListDtoSelector<TDto>());
+        }
         Expression<Func<T1, TDto>> GetToListDtoSelector<TDto>()
         {
             var expParam = _tables[0].Parameter ?? Expression.Parameter(typeof(T1), "a");
@@ -503,7 +547,7 @@ namespace FreeSql.Internal.CommonProvider
             if (memExp == null) throw new ArgumentException($"{CoreStrings.Cannot_Resolve_ExpressionTree(nameof(property))}2");
             var parTb = _commonUtils.GetTableByEntity(memExp.Expression.Type);
             if (parTb == null) throw new ArgumentException($"{CoreStrings.Cannot_Resolve_ExpressionTree(nameof(property))}3");
-            var parTbref = parTb.GetTableRef(memExp.Member.Name, true);
+            var parTbref = parTb.GetTableRef(memExp.Member.Name, true, true);
             if (parTbref == null) throw new ArgumentException(CoreStrings.Not_Valid_Navigation_Property(nameof(property)));
             switch (parTbref.RefType)
             {
@@ -561,6 +605,14 @@ namespace FreeSql.Internal.CommonProvider
                 {
                     var methodParameterTypes = node.Method.GetParameters().Select(a => a.ParameterType).ToArray();
                     var method = _replaceExp.Type.GetMethod(node.Method.Name, methodParameterTypes);
+                    if (method == null && _replaceExp.Type.IsInterface)
+                    {
+                        foreach (var baseInterface in _replaceExp.Type.GetInterfaces())
+                        {
+                            method = baseInterface.GetMethod(node.Method.Name, methodParameterTypes);
+                            if (method != null) break;
+                        }
+                    }
                     if (node.Object?.NodeType == ExpressionType.Parameter && node.Object == oldParameter)
                         return Expression.Call(_replaceExp, method, node.Arguments);
                     return Expression.Call(Visit(node.Object), method, node.Arguments);
@@ -674,7 +726,7 @@ namespace FreeSql.Internal.CommonProvider
             var tbrefOneToManyColumns = new List<List<MemberExpression>>(); //临时 OneToMany 三个表关联，第三个表需要前两个表确定
             if (whereExp == null)
             {
-                tbref = tb.GetTableRef(collMem.Member.Name, true);
+                tbref = tb.GetTableRef(collMem.Member.Name, true, true);
                 if (tbref == null) throw new Exception(CoreStrings.IncludeMany_NotValid_Navigation(tb.Type.DisplayCsharp(), collMem.Member.Name));
             }
             else
@@ -1146,6 +1198,7 @@ namespace FreeSql.Internal.CommonProvider
                             var tbrefMid = _commonUtils.GetTableByEntity(tbref.RefMiddleEntityType);
                             var tbrefMidName = _tableRules?.FirstOrDefault()?.Invoke(tbref.RefMiddleEntityType, tbrefMid.DbName) ?? tbrefMid.DbName;
                             var sbJoin = new StringBuilder().Append($"{_commonUtils.QuoteSqlName(tbrefMidName)} midtb ON ");
+                            if (_orm.CodeFirst.IsAutoSyncStructure && tbrefMid.Type != typeof(object)) _orm.CodeFirst.SyncStructure(tbrefMid.Type, tbrefMidName);
                             for (var z = 0; z < tbref.RefColumns.Count; z++)
                             {
                                 if (z > 0) sbJoin.Append(" AND ");
@@ -1582,7 +1635,12 @@ namespace FreeSql.Internal.CommonProvider
             }
             return ret;
         }
-        async public Task<List<TDto>> ToListAsync<TDto>(CancellationToken cancellationToken = default) => typeof(T1) == typeof(TDto) ? await ToListAsync(false, cancellationToken) as List<TDto> : await ToListAsync(GetToListDtoSelector<TDto>(), cancellationToken);
+        async public Task<List<TDto>> ToListAsync<TDto>(CancellationToken cancellationToken = default)
+        {
+            if (typeof(T1) == typeof(TDto)) return await ToListAsync(false, cancellationToken) as List<TDto>;
+            if (_tables.FirstOrDefault()?.Table.Type == typeof(object)) return await ToListAsync<TDto>("*", cancellationToken);
+            return await ToListAsync(GetToListDtoSelector<TDto>(), cancellationToken);
+        }
 
         public Task<int> InsertIntoAsync<TTargetEntity>(string tableName, Expression<Func<T1, TTargetEntity>> select, CancellationToken cancellationToken = default) where TTargetEntity : class => base.InternalInsertIntoAsync<TTargetEntity>(tableName, select, cancellationToken);
 

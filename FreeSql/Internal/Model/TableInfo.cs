@@ -24,7 +24,7 @@ namespace FreeSql.Internal.Model
         public string DbName { get; set; }
         public string DbOldName { get; set; }
         public bool DisableSyncStructure { get; set; }
-        public string Comment { get; internal set; }
+        public string Comment { get; set; }
         public bool IsRereadSql { get; internal set; }
         public bool IsDictionaryType { get; internal set; }
 
@@ -32,18 +32,36 @@ namespace FreeSql.Internal.Model
         public ColumnInfo AsTableColumn { get; internal set; }
         public ColumnInfo VersionColumn { get; set; }
 
+        public void SetAsTable(IAsTable astable, ColumnInfo column)
+        {
+            AsTableImpl = astable;
+            AsTableColumn = column;
+        }
+
         ConcurrentDictionary<string, TableRef> _refs { get; } = new ConcurrentDictionary<string, TableRef>(StringComparer.CurrentCultureIgnoreCase);
 
         internal void AddOrUpdateTableRef(string propertyName, TableRef tbref)
         {
             _refs.AddOrUpdate(propertyName, tbref, (ok, ov) => tbref);
         }
-        public TableRef GetTableRef(string propertyName, bool isThrowException)
+        public TableRef GetTableRef(string propertyName, bool isThrowException, bool isCascadeQuery = true)
         {
             if (_refs.TryGetValue(propertyName, out var tryref) == false) return null;
             if (tryref.Exception != null)
             {
                 if (isThrowException) throw tryref.Exception;
+                return null;
+            }
+            if (isCascadeQuery == false && tryref.IsTempPrimary == true)
+            {
+                if (isThrowException)
+                {
+                    switch (tryref.RefType)
+                    {
+                        case TableRefType.OneToMany: throw new Exception($"[Navigate(\"{string.Join(",", tryref.RefColumns.Select(a => a.CsName))}\", TempPrimary = \"{string.Join(",", tryref.Columns.Select(a => a.CsName))}\")] Only cascade query are supported");
+                        case TableRefType.ManyToOne: throw new Exception($"[Navigate(\"{string.Join(",", tryref.Columns.Select(a => a.CsName))}\", TempPrimary = \"{string.Join(",", tryref.RefColumns.Select(a => a.CsName))}\")] Only cascade query are supported");
+                    }
+                }
                 return null;
             }
             return tryref;
@@ -160,6 +178,7 @@ namespace FreeSql.Internal.Model
         public List<ColumnInfo> RefColumns { get; set; } = new List<ColumnInfo>();
 
         public Exception Exception { get; set; }
+        public bool IsTempPrimary { get; set; }
     }
     public enum TableRefType
     {

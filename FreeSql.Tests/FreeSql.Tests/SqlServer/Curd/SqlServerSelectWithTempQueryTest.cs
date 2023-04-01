@@ -1,4 +1,5 @@
 ﻿using FreeSql.DataAnnotations;
+using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -8,6 +9,641 @@ namespace FreeSql.Tests.SqlServer
 {
     public class SqlServerSelectWithTempQueryTest
     {
+        [Fact]
+        public void Issues1467()
+        {
+            var fsql = g.mysql;
+            //测试任务信息子查询
+            var deliverInfoQuery = fsql.Select<Issues1467Class.DeliverInfo, Issues1467Class.DeliverInfo, Issues1467Class.DeliverInfoBottle, Issues1467Class.DeliverInfoBottle>()
+                .LeftJoin(x => x.t1.Id == x.t2.RefId)
+                .LeftJoin(x => x.t3.DeliverId == x.t1.Id)
+                .LeftJoin(x => x.t4.DeliverId == x.t2.Id)
+                .GroupBy(x => x.t1.Id)
+                .WithTempQuery(x => new
+                {
+                    x.Value.Item1.Id,
+                    Bottlecodes = SqlExt.GroupConcat(x.Value.Item3.BottleCode).ToValue(),
+                    Pbottlecodes = SqlExt.GroupConcat(x.Value.Item4.BottleCode).ToValue()
+                });
+
+            //测试任务送样子查询
+            var deliverProtocolQuery = fsql.Select<Issues1467Class.DeliverProtocol>()
+                .WithTempQuery(x => new
+                {
+                    x.DeliverId,
+                    ProtocolIds = SqlExt.GroupConcat(x.ProtocolId).ToValue()
+                });
+
+            //接收状态
+            var deliverStatusQuery = fsql.Select<Issues1467Class.DeliverInfo, Issues1467Class.DeliverInfoBottle, Issues1467Class.Biologys>()
+                .LeftJoin(x => x.t1.Id == x.t2.DeliverId)
+                .LeftJoin(x => x.t3.DeliverId == x.t1.Id)
+                .Where(x => x.t3.Status != 1);
+
+            //项目信息子查询
+            var projectQuery = fsql.Select<Issues1467Class.Project>();
+
+            var sql1 = fsql.Select<Issues1467Class.DeliverInfo>()
+                .FromQuery(deliverInfoQuery, deliverProtocolQuery, projectQuery)
+                .LeftJoin(x => x.t1.Id == x.t2.Id)
+                .LeftJoin(x => x.t1.Id == x.t3.DeliverId)
+                .LeftJoin(x => x.t1.ProjectId == x.t4.Id)
+                .Page(1, 20)
+                .ToSql(x => new Issues1467Class.ResponseDeliverInfoDto
+                {
+                    ProjectCode = x.t4.ProjectCode,
+                    ProjectName = x.t4.ProjectName,
+                    ReceiveStatus = x.t1.Receivestatus == 1 ? x.t1.Receivestatus.Value : fsql.Select<Issues1467Class.DeliverInfo, Issues1467Class.DeliverInfoBottle, Issues1467Class.Biologys>()
+                        .LeftJoin(y => y.t1.Id == y.t2.DeliverId)
+                        .LeftJoin(y => y.t3.DeliverId == y.t1.Id)
+                        .Where(y => y.t3.Status != 1)
+                        .Where(y => y.t1.Id == x.t1.Id || y.t1.RefId == x.t1.Id).Count(),//deliverStatusQuery.Where(y => y.t1.Id == x.t1.Id || y.t1.RefId == x.t1.Id).Count(),
+                    RefCount = fsql.Select<Issues1467Class.DeliverInfo>().Where(y => y.RefId == x.t1.Id).Count()
+                });
+            Assert.Equal(@"SELECT a.`Id` as1, a.`Code` as2, a.`Deliver_Date` as3, a.`Receiver` as4, a.`Creator` as5, a.`CreatorName` as6, a.`Create_Date` as7, a.`ReceiverName` as8, a.`SampleSender` as9, a.`SampleSenderName` as10, a.`Receive_Date` as11, a.`Type` as12, htc.`ProtocolIds` as13, a.`ProjectID` as14, a.`Status` as15, a.`RefuseReason` as16, a.`RefId` as17, htb.`Bottlecodes` as18, htb.`Pbottlecodes` as19, htd.`ProjectCode` as20, htd.`ProjectName` as21, case when a.`Receivestatus` = 1 then a.`Receivestatus` else (SELECT count(1) 
+    FROM `Issues1467Class_deliverinfo` ht1 
+    LEFT JOIN `Issues1467Class_deliverinfo_bottle` ht2 ON ht1.`Id` = ht2.`DeliverId` 
+    LEFT JOIN `Issues1467Class_biologys` ht3 ON ht3.`DeliverId` = ht1.`Id` 
+    WHERE (ht3.`Status` <> 1) AND ((ht1.`Id` = a.`Id` OR ht1.`RefId` = a.`Id`))) end as22, (SELECT count(1) 
+    FROM `Issues1467Class_deliverinfo` y 
+    WHERE (y.`RefId` = a.`Id`)) as23 
+FROM `Issues1467Class_deliverinfo` a 
+LEFT JOIN ( 
+    SELECT a.`Id`, group_concat(c.`BottleCode`) `Bottlecodes`, group_concat(d.`BottleCode`) `Pbottlecodes` 
+    FROM `Issues1467Class_deliverinfo` a 
+    LEFT JOIN `Issues1467Class_deliverinfo` b ON a.`Id` = b.`RefId` 
+    LEFT JOIN `Issues1467Class_deliverinfo_bottle` c ON c.`DeliverId` = a.`Id` 
+    LEFT JOIN `Issues1467Class_deliverinfo_bottle` d ON d.`DeliverId` = b.`Id` 
+    GROUP BY a.`Id` ) htb ON a.`Id` = htb.`Id` 
+LEFT JOIN ( 
+    SELECT a.`DeliverID` `DeliverId`, group_concat(a.`ProtocolID`) `ProtocolIds` 
+    FROM `Issues1467Class_deliverinfo_protocols` a ) htc ON a.`Id` = htc.`DeliverId` 
+LEFT JOIN `Issues1467Class_project` htd ON a.`ProjectID` = htd.`Id` 
+limit 0,20", sql1);
+
+            var reponse = fsql.Select<Issues1467Class.DeliverInfo>()
+                .FromQuery(deliverInfoQuery, deliverProtocolQuery, projectQuery)
+                .LeftJoin(x => x.t1.Id == x.t2.Id)
+                .LeftJoin(x => x.t1.Id == x.t3.DeliverId)
+                .LeftJoin(x => x.t1.ProjectId == x.t4.Id)
+                .Page(1, 20)
+                .Count(out var total)
+                .ToSql(x => new Issues1467Class.ResponseDeliverInfoDto
+                {
+                    ProjectCode = x.t4.ProjectCode,
+                    ProjectName = x.t4.ProjectName,
+                    ReceiveStatus = x.t1.Receivestatus == 1 ? x.t1.Receivestatus.Value : deliverStatusQuery.Where(y => y.t1.Id == x.t1.Id || y.t1.RefId == x.t1.Id).Count(),
+                    RefCount = fsql.Select<Issues1467Class.DeliverInfo>().Where(y => y.RefId == x.t1.Id).Count()
+                });
+        }
+
+        #region #1467 class
+        public class Issues1467Class
+        {
+            public class ResponseDeliverInfoDto
+            {
+                public string Id { get; set; }
+                /// <summary>
+                /// 测试任务编号，系统自动生成
+                /// </summary>
+                public string Code { get; set; }
+                /// <summary>
+                /// 送样日期
+                /// </summary>
+                public DateTime Deliver_Date { get; set; }
+                /// <summary>
+                /// 接收人
+                /// </summary>
+                public string Receiver { get; set; }
+                /// <summary>
+                /// 创建人
+                /// </summary>
+                public string Creator { get; set; }
+                /// <summary>
+                /// 提交人
+                /// </summary>
+                public string CreatorName { get; set; }
+
+                /// <summary>
+                /// 提交日期
+                /// </summary>
+                public DateTime Create_Date { get; set; }
+
+                /// <summary>
+                /// 接收人姓名
+                /// </summary>
+                public string ReceiverName { get; set; }
+                /// <summary>
+                /// 送样人员
+                /// </summary>
+                public string SampleSender { get; set; }
+                /// <summary>
+                /// 送样人员姓名
+                /// </summary>
+                public string SampleSenderName { get; set; }
+                /// <summary>
+                /// 接收日期
+                /// </summary>
+                public DateTime? Receive_Date { get; set; }
+                /// <summary>
+                /// 测试方式（取字典）
+                /// </summary>
+                public string Type { get; set; }
+                /// <summary>
+                /// 实验方法ID字符串，以分号间隔
+                /// </summary>
+                public string ProtocolIds { get; set; }
+                /// <summary>
+                /// 项目编号（原为ProjectID）
+                /// </summary>
+                public string ProjectId { get; set; }
+                /// <summary>
+                /// 任务状态
+                /// </summary>
+                public int Status { get; set; }
+                /// <summary>
+                /// 接收状态 
+                /// </summary>
+                public long ReceiveStatus { get; set; }
+                /// <summary>
+                /// 拒收理由
+                /// </summary>
+                public string RefuseReason { get; set; }
+                /// <summary>
+                /// 分配关联送样Id
+                /// </summary>
+                public string RefId { get; set; }
+                /// <summary>
+                /// 分配子任务数量
+                /// </summary>
+                public long RefCount { get; set; }
+                /// <summary>
+                /// 样品编号(目前本身有的)
+                /// </summary>
+                public string BottleCodes { get; set; }
+                /// <summary>
+                /// 样品编号(已经被分配出去的)
+                /// </summary>
+                public string PBottleCodes { get; set; }
+                /// <summary>
+                /// 项目编号
+                /// </summary>
+                public string ProjectCode { get; set; }
+                /// <summary>
+                /// 项目名称
+                /// </summary>
+                public string ProjectName { get; set; }
+            }
+
+            public class BaseEntity
+            {
+                [Column(IsPrimary = true)]
+                public string Id { get; set; }
+                /// <summary>
+                /// 版本号
+                /// </summary>
+                public string Version { get; set; }
+                /// <summary>
+                /// 创建者ID
+                /// </summary>
+                public string Creator { get; set; }
+                /// <summary>
+                /// 创建人姓名
+                /// </summary>
+                public string CreatorName { get; set; }
+                /// <summary>
+                /// 创建时间
+                /// </summary>
+                [Column(ServerTime = DateTimeKind.Local, CanUpdate = false)]
+                public DateTime Create_Date { get; set; }
+                /// <summary>
+                /// ip地址
+                /// </summary>
+                [Column(Name = "IP_Address")]
+                public string IpAddress { get; set; }
+                /// <summary>
+                /// 修改人id
+                /// </summary>
+                public string Modifier { get; set; }
+                /// <summary>
+                /// 修改人姓名
+                /// </summary>
+                public string ModifierName { get; set; }
+                /// <summary>
+                /// 修改人ip
+                /// </summary>
+                public string Modifier_IP { get; set; }
+                /// <summary>
+                /// 修改时间
+                /// </summary>
+                [Column(ServerTime = DateTimeKind.Local)]
+                public DateTime Modify_Date { get; set; }
+                /// <summary>
+                /// 审批状态，由审批模块返回
+                /// </summary>
+                public int? Auditstatus { get; set; }
+                /// <summary>
+                /// 信息状态 
+                /// </summary>
+                public int Status { get; set; }
+                /// <summary>
+                /// 备注
+                /// </summary>
+                public string Comments { get; set; }
+                /// <summary>
+                /// 组织编码
+                /// </summary>
+                public string OrganCode { get; set; }
+            }
+
+            /// <summary>
+            /// 测试任务表
+            /// 主表
+            /// </summary>
+            [Table(Name = "Issues1467Class_deliverinfo")]
+            public class DeliverInfo : BaseEntity
+            {
+                /// <summary>
+                /// 测试任务编号，系统自动生成
+                /// </summary>
+                public string Code { get; set; }
+                /// <summary>
+                /// 送样日期
+                /// </summary>
+                public DateTime Deliver_Date { get; set; }
+                /// <summary>
+                /// 接收人
+                /// </summary>
+                public string Receiver { get; set; }
+                /// <summary>
+                /// 接收人姓名
+                /// </summary>
+                public string ReceiverName { get; set; }
+                /// <summary>
+                /// 送样人员
+                /// </summary>
+                public string SampleSender { get; set; }
+                /// <summary>
+                /// 送样人员姓名
+                /// </summary>
+                public string SampleSenderName { get; set; }
+                /// <summary>
+                /// 接收日期
+                /// </summary>
+                public DateTime? Receive_Date { get; set; }
+                /// <summary>
+                /// 测试方式（取字典）
+                /// </summary>
+                public string Type { get; set; }
+                /// <summary>
+                /// 项目编号
+                /// </summary>
+                [Column(Name = "ProjectID")]
+                public string ProjectId { get; set; }
+                /// <summary>
+                /// 接收状态 
+                /// </summary>
+                public int? Receivestatus { get; set; }
+                /// <summary>
+                /// 拒收理由
+                /// </summary>
+                public string RefuseReason { get; set; }
+                /// <summary>
+                /// 分配关联送样ID
+                /// </summary>
+                public string RefId { get; set; }
+                /// <summary>
+                /// 分配子任务数量
+                /// </summary>
+                [Column(IsIgnore = true)]
+                public int RefCount { get; set; }
+                /// <summary>
+                /// 自定义表单内容
+                /// </summary>
+                public string CustomColumns { get; set; }
+            }
+
+            /// <summary>
+            /// 送样样品中间表
+            /// </summary>
+            [Table(Name = "Issues1467Class_deliverinfo_bottle")]
+            public class DeliverInfoBottle
+            {
+                [Column(IsPrimary = true)]
+                public string Id { get; set; }
+                /// <summary>
+                /// 样品编号
+                /// </summary>
+                public string BottleCode { get; set; }
+                /// <summary>
+                /// 送样ID
+                /// </summary>
+                public string DeliverId { get; set; }
+                /// <summary>
+                /// 送样量
+                /// </summary>
+                public string Amount { get; set; }
+            }
+
+            /// <summary>
+            /// 测试任务送样方法表
+            /// </summary>
+            [Table(Name = "Issues1467Class_deliverinfo_protocols")]
+            public class DeliverProtocol
+            {
+                /// <summary>
+                /// 数据主键
+                /// </summary>
+                [Column(IsPrimary = true)]
+                public string Id { get; set; }
+                /// <summary>
+                /// 测试任务ID
+                /// </summary>
+                [Column(Name = "DeliverID")]
+                public string DeliverId { get; set; }
+                /// <summary>
+                /// 实验方法ID
+                /// </summary>
+                [Column(Name = "ProtocolID")]
+                public string ProtocolId { get; set; }
+            }
+
+            /// <summary>
+            /// 项目信息
+            /// </summary>
+            /// <returns></returns>
+            [Table(Name = "Issues1467Class_project")]
+            public class Project : BaseEntity
+            {
+                /// <summary>
+                /// 项目编号
+                /// </summary> 
+                public string ProjectCode { get; set; }
+                /// <summary>
+                /// 项目名称
+                /// </summary> 
+                public string ProjectName { get; set; }
+                /// <summary>
+                /// 所属部门
+                /// </summary> 
+                public string Department { get; set; }
+                /// <summary>
+                /// 说明
+                /// </summary> 
+                public string Description { get; set; }
+                /// <summary>
+                /// 计划开始时间
+                /// </summary> 
+                public DateTime? StartTime_Plan { get; set; }
+                /// <summary>
+                /// 计划结束时间
+                /// </summary> 
+                public DateTime? EndTime_Plan { get; set; }
+                /// <summary>
+                /// 实际开始时间
+                /// </summary> 
+                public DateTime? StartTime { get; set; }
+                /// <summary>
+                /// 实际结束时间
+                /// </summary> 
+                public DateTime? EndTime { get; set; }
+
+                /// <summary>
+                /// 是否是PM同步过来的
+                /// </summary>
+                public int IsSync { get; set; }
+
+                /// <summary>
+                /// PM同步的项目主键信息
+                /// </summary>
+                [Column(Name = "RefID")]
+                public int RefId { get; set; }
+                /// <summary>
+                /// 是否禁用 1是 0 否
+                /// </summary>
+                public int IsDisable { get; set; }
+
+                /// <summary>
+                /// 部门Id
+                /// </summary>
+                public int DeptId { get; set; }
+            }
+
+            /// <summary>
+            /// 生物模块信息表
+            /// 主表
+            /// </summary>
+            [Table(Name = "Issues1467Class_biologys")]
+            public class Biologys : BaseEntity
+            {
+                /// <summary>
+                /// 生物编号,系统自动生成
+                /// </summary>
+                public string Code { get; set; }
+                /// <summary>
+                /// 项目编号
+                /// </summary>
+                [Column(Name = "ProjectID")]
+                public string ProjectId { get; set; }
+
+                /// <summary>
+                /// 样品编号
+                /// </summary>
+                public string BottleCode { get; set; }
+                /// <summary>
+                /// 测试方法Id
+                /// </summary>
+                [Column(Name = "ProtocolID")]
+                public string ProtocolId { get; set; }
+                /// <summary>
+                /// 实验日期
+                /// </summary>
+                public DateTime? Experiment_Date { get; set; }
+                /// <summary>
+                /// 送样日期
+                /// </summary>
+                public DateTime? Deliver_Date { get; set; }
+                /// <summary>
+                /// 测试任务ID
+                /// </summary>
+                public string DeliverId { get; set; }
+                /// <summary>
+                /// 测试任务编号
+                /// </summary>
+                public string DeliverCode { get; set; }
+                /// <summary>
+                /// 记录编号
+                /// </summary>
+                public string BookNumber { get; set; }
+                /// <summary>
+                /// 自定义表单数据
+                /// </summary>
+                public string CustomColumns { get; set; }
+                /// <summary>
+                /// 测试类型
+                /// </summary>
+                public string BiologyType { get; set; }
+            }
+        }
+        #endregion
+
+        [Fact]
+        public void IssuesWithTempQueryAndDto()
+        {
+            var fsql = g.sqlserver;
+            var lpsPgi = fsql.Select<UnitLog, LoadPlan, Instruction>()
+                .InnerJoin((a, b, c) => a.LoadNo == b.LoadNo && a.UnitTransactionType == "TO")
+                .InnerJoin((a, b, c) => b.InstructionNo == c.InstructionNo)
+                .WithTempQuery((a, b, c) => new
+                {
+                    a.LoadNo,
+                    a.SeqNoLog,
+                    c.DeliveryInstractionStatus,
+                    c.UpTime, 
+                    RN = SqlExt.RowNumber().Over().PartitionBy(a.UnitId).OrderByDescending(a.SeqNoLog).ToValue()
+                });
+
+            var sql = fsql.Select<UnitLog>()
+                .FromQuery(lpsPgi)
+                .InnerJoin((a, b) => a.SeqNoLog == b.SeqNoLog)
+                .WithTempQuery((a, b) => new { Item1 = a, Item2 = b })
+                .From<Unit>()
+                .InnerJoin((a, b) => a.Item1.UnitId == b.UnitId)
+                .Where((a, b) => a.Item2.RN < 2)
+                .ToSql((a, b) => new MB51_View
+                {
+                    //CkassIfCation = a.Item1.CkassIfCation,
+                    PGI = a.Item2.DeliveryInstractionStatus,
+                    PGITime = a.Item2.UpTime,
+                    IsDelayPGI = true,
+                    RunNo = b.RunNo
+                });
+            Assert.Equal(@"SELECT a.[CkassIfCation] as1, a.[DeliveryInstractionStatus] as2, a.[UpTime] as3, 1 as4, b.[RunNo] as5 
+FROM ( 
+    SELECT a.[UnitId], a.[LoadNo], a.[UnitTransactionType], a.[SeqNoLog], a.[CkassIfCation], b.[LoadNo] [LoadNo2], b.[SeqNoLog] [SeqNoLog2], b.[DeliveryInstractionStatus], b.[UpTime], b.[RN] 
+    FROM [UnitLog] a 
+    INNER JOIN ( 
+        SELECT a.[LoadNo], a.[SeqNoLog], c.[DeliveryInstractionStatus], c.[UpTime], row_number() over( partition by a.[UnitId] order by a.[SeqNoLog] desc) [RN] 
+        FROM [UnitLog] a 
+        INNER JOIN [LoadPlan] b ON a.[LoadNo] = b.[LoadNo] AND a.[UnitTransactionType] = N'TO' 
+        INNER JOIN [Instruction] c ON b.[InstructionNo] = c.[InstructionNo] ) b ON a.[SeqNoLog] = b.[SeqNoLog] ) a 
+INNER JOIN [Unit] b ON a.[UnitId] = b.[UnitId] 
+WHERE (a.[RN] < 2)", sql);
+
+            sql = fsql.Select<UnitLog>().FromQuery(
+                    fsql.Select<UnitLog, LoadPlan, Instruction>()
+                        .InnerJoin((a, b, c) => a.LoadNo == b.LoadNo && a.UnitTransactionType == "TO")
+                        .InnerJoin((a, b, c) => b.InstructionNo == c.InstructionNo)
+                        .WithTempQuery((a, b, c) => new
+                        {
+                            a.LoadNo,
+                            a.SeqNoLog,
+                            c.DeliveryInstractionStatus,
+                            c.UpTime,
+                            RN = SqlExt.RowNumber().Over().PartitionBy(a.UnitId).OrderByDescending(a.SeqNoLog).ToValue()
+                        }),
+                    fsql.Select<Unit>())
+                .InnerJoin((a,b,c) => a.SeqNoLog == b.SeqNoLog)
+                .InnerJoin((a,b,c) => a.UnitId == c.UnitId)
+                .Where((a,b,c) => b.RN < 2)
+                .ToSql((a,b,c) => new MB51_View
+                {
+                    //CkassIfCation = a.Item1.CkassIfCation,
+                    PGI = b.DeliveryInstractionStatus,
+                    PGITime = b.UpTime,
+                    IsDelayPGI = true,
+                    RunNo = c.RunNo
+                });
+            Assert.Equal(@"SELECT a.[CkassIfCation] as1, b.[DeliveryInstractionStatus] as2, b.[UpTime] as3, 1 as4, c.[RunNo] as5 
+FROM [UnitLog] a 
+INNER JOIN ( 
+    SELECT a.[LoadNo], a.[SeqNoLog], c.[DeliveryInstractionStatus], c.[UpTime], row_number() over( partition by a.[UnitId] order by a.[SeqNoLog] desc) [RN] 
+    FROM [UnitLog] a 
+    INNER JOIN [LoadPlan] b ON a.[LoadNo] = b.[LoadNo] AND a.[UnitTransactionType] = N'TO' 
+    INNER JOIN [Instruction] c ON b.[InstructionNo] = c.[InstructionNo] ) b ON a.[SeqNoLog] = b.[SeqNoLog] 
+INNER JOIN [Unit] c ON a.[UnitId] = c.[UnitId] 
+WHERE (b.[RN] < 2)", sql);
+        }
+        class MB51_View
+        {
+            public string CkassIfCation { get; set; }
+            public string PGI { get; set; }
+            public DateTime PGITime { get; set; }
+            public bool IsDelayPGI { get; set; }
+            public string RunNo { get; set; }
+        }
+        class Unit
+        {
+            public string UnitId { get; set; }
+            public string RunNo { get; set; }
+            public string CkassIfCation { get; set; }
+        }
+        class UnitLog
+        {
+            public string UnitId { get; set; }
+            public string LoadNo { get; set; }
+            public string UnitTransactionType { get; set; }
+            public string SeqNoLog { get; set; }
+            public string CkassIfCation { get; set; }
+        }
+        class LoadPlan
+        {
+            public string LoadNo { get; set; }
+            public string InstructionNo { get; set; }
+
+        }
+        class Instruction
+        {
+            public string InstructionNo { get; set; }
+            public string DeliveryInstractionStatus { get; set; }
+            public DateTime UpTime { get; set; }
+        }
+
+        [Fact]
+        public void IssuesParameter01()
+        {
+            using (var fsql = new FreeSql.FreeSqlBuilder()
+                .UseConnectionFactory(FreeSql.DataType.SqlServer, () => new SqlConnection("Data Source=.;Integrated Security=True;Initial Catalog=issues684;Pooling=true;Max Pool Size=36;TrustServerCertificate=true"))
+                .UseAutoSyncStructure(true)
+                .UseGenerateCommandParameterWithLambda(true)
+                .Build())
+            {
+                fsql.Aop.CommandBefore += (_, e) =>
+                {
+
+                };
+                var qlrzjh = "qlrzjh";
+                var qzh = "qzh";
+                var sql = fsql.Select<QLR_TO_LSH>()
+                    .Where(a => a.QLRZJHM == qlrzjh && a.QZH == qzh)
+                    .GroupBy(a => new { a.QLRZJHM, a.QZH })
+                    .WithTempQuery(g => new { BBH = g.Min(g.Value.BBH), g.Key })
+                    .From<QLR_TO_LSH>()
+                    .InnerJoin((a, b) => a.BBH == b.BBH && b.QLRZJHM == qlrzjh && b.QZH == qzh)
+                    .ToSql((a, b) => b);
+                Assert.Equal(@"SELECT b.[QLRZJHM] as1, b.[QZH] as2, b.[BBH] as3 
+FROM ( 
+    SELECT min(a.[BBH]) [BBH], a.[QLRZJHM], a.[QZH] 
+    FROM [QLR_TO_LSH] a 
+    WHERE (a.[QLRZJHM] = @exp_0 AND a.[QZH] = @exp_1) 
+    GROUP BY a.[QLRZJHM], a.[QZH] ) a 
+INNER JOIN [QLR_TO_LSH] b ON a.[BBH] = b.[BBH] AND b.[QLRZJHM] = N'qlrzjh' AND b.[QZH] = N'qzh'", sql);
+                fsql.Select<QLR_TO_LSH>()
+                    .Where(a => a.QLRZJHM == qlrzjh && a.QZH == qzh)
+                    .GroupBy(a => new { a.QLRZJHM, a.QZH })
+                    .WithTempQuery(g => new { BBH = g.Min(g.Value.BBH), g.Key })
+                    .From<QLR_TO_LSH>()
+                    .InnerJoin((a, b) => a.BBH == b.BBH && b.QLRZJHM == qlrzjh && b.QZH == qzh)
+                    .First();
+            }
+        }
+        class QLR_TO_LSH
+        {
+            public string QLRZJHM { get; set; }
+            public string QZH { get; set; }
+            public int BBH { get; set; }
+        }
+
         #region issues #1215
 
         [Fact]
@@ -1229,7 +1865,7 @@ WHERE ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02'))";
                 .InnerJoin((a, b) => a.user.Id == b.UserId)
                 .Where((a, b) => a.user.Nickname == "name03" || a.user.Nickname == "name02")
                 .ToSql((a, b) => new TwoTablePartitionBy_UserDto());
-            var assertSql08 = @"SELECT a.[rownum] as1, b.[Remark] as2 
+            var assertSql08 = @"SELECT a.[Id] as1, a.[rownum] as2, b.[Remark] as3 
 FROM ( 
     SELECT a.[Id], a.[Nickname], row_number() over( partition by a.[Nickname] order by a.[Id]) [rownum] 
     FROM [TwoTablePartitionBy_User] a ) a 
@@ -1252,10 +1888,10 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .ToList<TwoTablePartitionBy_UserDto>();
             Assert.Equal(list08.Count, 2);
             Assert.Equal(list08[0].rownum, 1);
-            Assert.Equal(list08[0].Id, 0);
+            Assert.Equal(list08[0].Id, 4);
             Assert.Equal(list08[0].remark, "remark04");
             Assert.Equal(list08[1].rownum, 1);
-            Assert.Equal(list08[1].Id, 0);
+            Assert.Equal(list08[1].Id, 5);
             Assert.Equal(list08[1].remark, "remark05");
 
 
@@ -1270,7 +1906,7 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .InnerJoin((a, b) => a.user.Id == b.UserId)
                 .Where((a, b) => a.user.Nickname == "name03" || a.user.Nickname == "name02")
                 .ToSql((a, b) => new TwoTablePartitionBy_UserDto());
-            var assertSql09 = @"SELECT a.[rownum] as1, b.[Remark] as2 
+            var assertSql09 = @"SELECT a.[Id] as1, a.[rownum] as2, b.[Remark] as3 
 FROM ( 
     SELECT a.[Id], a.[Nickname], row_number() over( partition by a.[Nickname] order by a.[Id]) [rownum] 
     FROM [TwoTablePartitionBy_User] a ) a 
@@ -1293,10 +1929,10 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .ToList<TwoTablePartitionBy_UserDto>();
             Assert.Equal(list09.Count, 2);
             Assert.Equal(list09[0].rownum, 1);
-            Assert.Equal(list09[0].Id, 0);
+            Assert.Equal(list09[0].Id, 4);
             Assert.Equal(list09[0].remark, "remark04");
             Assert.Equal(list09[1].rownum, 1);
-            Assert.Equal(list09[1].Id, 0);
+            Assert.Equal(list09[1].Id, 5);
             Assert.Equal(list09[1].remark, "remark05");
 
 
@@ -1311,7 +1947,7 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .InnerJoin((a, b) => a.user.Id == b.UserId)
                 .Where((a, b) => a.user.Nickname == "name03" || a.user.Nickname == "name02")
                 .ToSql((a, b) => new TwoTablePartitionBy_UserDto());
-            var assertSql091 = @"SELECT a.[rownum] as1, b.[Remark] as2 
+            var assertSql091 = @"SELECT a.[Id] as1, a.[rownum] as2, b.[Remark] as3 
 FROM ( 
     SELECT a.[Id], a.[Nickname], row_number() over( partition by a.[Nickname] order by a.[Id]) [rownum] 
     FROM [TwoTablePartitionBy_User] a ) a 
@@ -1335,10 +1971,10 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .ToList<TwoTablePartitionBy_UserDto>();
             Assert.Equal(list091.Count, 2);
             Assert.Equal(list091[0].rownum, 1);
-            Assert.Equal(list091[0].Id, 0);
+            Assert.Equal(list091[0].Id, 4);
             Assert.Equal(list091[0].remark, "remark04");
             Assert.Equal(list091[1].rownum, 1);
-            Assert.Equal(list091[1].Id, 0);
+            Assert.Equal(list091[1].Id, 5);
             Assert.Equal(list091[1].remark, "remark05");
 
 
@@ -1353,7 +1989,7 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .InnerJoin((a, b) => a.user.Id == b.Key.UserId)
                 .Where((a, b) => a.user.Nickname == "name03" || a.user.Nickname == "name02")
                 .ToSql((a, b) => new TwoTablePartitionBy_UserDto());
-            var assertSql10 = @"SELECT a.[rownum] as1 
+            var assertSql10 = @"SELECT a.[Id] as1, a.[rownum] as2, b.[Remark] as3 
 FROM ( 
     SELECT a.[Id], a.[Nickname], row_number() over( partition by a.[Nickname] order by a.[Id]) [rownum] 
     FROM [TwoTablePartitionBy_User] a ) a 
@@ -1377,11 +2013,11 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .ToList<TwoTablePartitionBy_UserDto>();
             Assert.Equal(list10.Count, 2);
             Assert.Equal(list10[0].rownum, 1);
-            Assert.Equal(list10[0].Id, 0);
-            Assert.Null(list10[0].remark);
+            Assert.Equal(list10[0].Id, 4);
+            Assert.Equal(list10[0].remark, "remark04");
             Assert.Equal(list10[1].rownum, 1);
-            Assert.Equal(list10[1].Id, 0);
-            Assert.Null(list10[1].remark);
+            Assert.Equal(list10[1].Id, 5);
+            Assert.Equal(list10[1].remark, "remark05");
 
 
             var sql11 = fsql.Select<TwoTablePartitionBy_User>()
@@ -1395,7 +2031,7 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .InnerJoin((a, b) => a.user.Id == b.uid)
                 .Where((a, b) => a.user.Nickname == "name03" || a.user.Nickname == "name02")
                 .ToSql((a, b) => new TwoTablePartitionBy_UserDto());
-            var assertSql11 = @"SELECT a.[rownum] as1 
+            var assertSql11 = @"SELECT a.[Id] as1, a.[rownum] as2 
 FROM ( 
     SELECT a.[Id], a.[Nickname], row_number() over( partition by a.[Nickname] order by a.[Id]) [rownum] 
     FROM [TwoTablePartitionBy_User] a ) a 
@@ -1419,11 +2055,11 @@ WHERE (a.[rownum] = 1) AND ((a.[Nickname] = N'name03' OR a.[Nickname] = N'name02
                 .ToList<TwoTablePartitionBy_UserDto>();
             Assert.Equal(list11.Count, 2);
             Assert.Equal(list11[0].rownum, 1);
-            Assert.Equal(list11[0].Id, 0);
+            Assert.Equal(list11[0].Id, 4);
             Assert.Null(list11[0].remark);
             Assert.Equal(list11[1].rownum, 1);
-            Assert.Equal(list11[1].Id, 0);
-            Assert.Null(list11[1].remark);
+            Assert.Equal(list11[1].Id, 5);
+            Assert.Null(list11[0].remark);
 
 
             var sql12 = fsql.Select<TwoTablePartitionBy_User>()
